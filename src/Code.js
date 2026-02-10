@@ -297,9 +297,7 @@ function doGet(e) {
     
     const htmlOutput = template.evaluate()
       .setTitle(`${APP_CONFIG.name} v${APP_CONFIG.version}`)
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-      .addMetaTag('description', 'Government Contract Management Dashboard');
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     
     // Update performance metrics
     const responseTime = new Date() - requestStart;
