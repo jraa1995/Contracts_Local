@@ -10,15 +10,9 @@ var filteredData = [];
 var currentPage = 1;
 var tablePageSize = 50;
 
-// ---- Debug Logger (visible on screen) ----
+// ---- Debug Logger (console only) ----
 function debugLog(msg) {
-  console.log(msg);
-  var el = document.getElementById('debugLog');
-  if (el) {
-    el.style.display = 'block';
-    el.innerHTML += '<div>' + new Date().toLocaleTimeString() + ' — ' + msg + '</div>';
-    el.scrollTop = el.scrollHeight;
-  }
+  console.log(new Date().toLocaleTimeString() + ' — ' + msg);
 }
 
 // ---- Init ----
@@ -130,6 +124,7 @@ function finishLoading() {
   updateSummaryCards();
   renderTable(filteredData);
   setupEventListeners();
+  ChartManager.init(filteredData);
   
   debugLog('Dashboard ready.');
 }
@@ -187,7 +182,7 @@ function renderTable(data) {
     tr.innerHTML = 
       '<td>' + esc(c.AWARD) + '</td>' +
       '<td>' + esc(c.PROJECT_TITLE || c.PROJECT) + '</td>' +
-      '<td>' + formatMoney(parseFloat(c.CEILING) || 0) + '</td>' +
+      '<td>N/A</td>' +
       '<td>' + formatMoney(parseFloat(c.CEILING) || 0) + '</td>' +
       '<td><span class="status-badge ' + statusClass(c.AWARD_STATUS) + '">' + esc(c.AWARD_STATUS) + '</span></td>' +
       '<td>' + formatDate(c.PROJECT_START) + '</td>' +
@@ -315,9 +310,41 @@ function applyFilters() {
     }
   }
   
+  // Date range filter
+  var dateField = (document.getElementById('dateFieldSelect') || {}).value || 'projectStart';
+  var dateStart = (document.getElementById('dateRangeStart') || {}).value || '';
+  var dateEnd = (document.getElementById('dateRangeEnd') || {}).value || '';
+  if (dateStart || dateEnd) {
+    filteredData = filteredData.filter(function(c) {
+      var field = dateField === 'projectEnd' ? c.PROJECT_END : c.PROJECT_START;
+      if (!field) return false;
+      try {
+        var d = new Date(field);
+        if (isNaN(d.getTime())) return false;
+        if (dateStart && d < new Date(dateStart)) return false;
+        if (dateEnd && d > new Date(dateEnd)) return false;
+        return true;
+      } catch(e) { return false; }
+    });
+  }
+  
+  // Financial range filter
+  var finMin = parseFloat((document.getElementById('financialMin') || {}).value);
+  var finMax = parseFloat((document.getElementById('financialMax') || {}).value);
+  if (!isNaN(finMin) || !isNaN(finMax)) {
+    filteredData = filteredData.filter(function(c) {
+      var ceil = parseFloat(c.CEILING) || 0;
+      if (!isNaN(finMin) && ceil < finMin) return false;
+      if (!isNaN(finMax) && ceil > finMax) return false;
+      return true;
+    });
+  }
+  
   currentPage = 1;
   updateSummaryCards();
   renderTable(filteredData);
+  ChartManager.updateAll(filteredData);
+  updateActiveFilterTags();
 }
 
 // ---- Event Listeners ----
@@ -413,6 +440,142 @@ function setupEventListeners() {
       exportCSV(filteredData);
     });
   }
+  
+  // Date range inputs
+  ['dateRangeStart', 'dateRangeEnd', 'dateFieldSelect'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', applyFilters);
+  });
+  
+  // Financial range inputs
+  ['financialMin', 'financialMax'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', applyFilters);
+  });
+  
+  // Date preset buttons
+  document.querySelectorAll('.date-preset-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var preset = btn.getAttribute('data-preset');
+      var now = new Date();
+      var start, end = now.toISOString().slice(0, 10);
+      if (preset === 'last30') {
+        start = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+      } else if (preset === 'last90') {
+        start = new Date(now.getTime() - 90 * 86400000).toISOString().slice(0, 10);
+      } else if (preset === 'thisYear') {
+        start = now.getFullYear() + '-01-01';
+        end = now.getFullYear() + '-12-31';
+      }
+      var startEl = document.getElementById('dateRangeStart');
+      var endEl = document.getElementById('dateRangeEnd');
+      if (startEl) startEl.value = start || '';
+      if (endEl) endEl.value = end || '';
+      // Toggle active class
+      document.querySelectorAll('.date-preset-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      applyFilters();
+    });
+  });
+  
+  // Financial preset buttons
+  document.querySelectorAll('.financial-preset-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var preset = btn.getAttribute('data-preset');
+      var minEl = document.getElementById('financialMin');
+      var maxEl = document.getElementById('financialMax');
+      if (preset === 'under100k') {
+        if (minEl) minEl.value = '0';
+        if (maxEl) maxEl.value = '100000';
+      } else if (preset === '100k-1m') {
+        if (minEl) minEl.value = '100000';
+        if (maxEl) maxEl.value = '1000000';
+      } else if (preset === 'over1m') {
+        if (minEl) minEl.value = '1000000';
+        if (maxEl) maxEl.value = '';
+      }
+      document.querySelectorAll('.financial-preset-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      applyFilters();
+    });
+  });
+  
+  // Sort handlers
+  setupSortHandlers();
+}
+
+// ---- Active Filter Tags ----
+function updateActiveFilterTags() {
+  var container = document.getElementById('activeFilters');
+  var list = document.getElementById('activeFiltersList');
+  if (!container || !list) return;
+  
+  list.innerHTML = '';
+  var tags = [];
+  
+  // Search
+  var search = (document.getElementById('searchInput') || {}).value || '';
+  if (search) tags.push({ label: 'Search: ' + search, clear: function() { document.getElementById('searchInput').value = ''; } });
+  
+  // Status
+  var statusSel = document.getElementById('statusFilter');
+  if (statusSel) {
+    var selected = Array.from(statusSel.selectedOptions).map(function(o) { return o.value; });
+    if (selected.length > 0) tags.push({ label: 'Status: ' + selected.join(', '), clear: function() { statusSel.selectedIndex = -1; } });
+  }
+  
+  // Organization
+  var orgSel = document.getElementById('organizationFilter');
+  if (orgSel) {
+    var selectedOrgs = Array.from(orgSel.selectedOptions).map(function(o) { return o.value; });
+    if (selectedOrgs.length > 0) tags.push({ label: 'Org: ' + selectedOrgs.join(', '), clear: function() { orgSel.selectedIndex = -1; } });
+  }
+  
+  // Contract type
+  var typeSel = document.getElementById('contractTypeFilter');
+  if (typeSel) {
+    var selectedTypes = Array.from(typeSel.selectedOptions).map(function(o) { return o.value; });
+    if (selectedTypes.length > 0) tags.push({ label: 'Type: ' + selectedTypes.join(', '), clear: function() { typeSel.selectedIndex = -1; } });
+  }
+  
+  // Date range
+  var dateStart = (document.getElementById('dateRangeStart') || {}).value || '';
+  var dateEnd = (document.getElementById('dateRangeEnd') || {}).value || '';
+  if (dateStart || dateEnd) {
+    tags.push({ label: 'Date: ' + (dateStart || '...') + ' to ' + (dateEnd || '...'), clear: function() {
+      var s = document.getElementById('dateRangeStart'); if (s) s.value = '';
+      var e = document.getElementById('dateRangeEnd'); if (e) e.value = '';
+      document.querySelectorAll('.date-preset-btn').forEach(function(b) { b.classList.remove('active'); });
+    }});
+  }
+  
+  // Financial range
+  var finMin = (document.getElementById('financialMin') || {}).value || '';
+  var finMax = (document.getElementById('financialMax') || {}).value || '';
+  if (finMin || finMax) {
+    tags.push({ label: 'Financial: ' + (finMin ? '$' + Number(finMin).toLocaleString() : '...') + ' to ' + (finMax ? '$' + Number(finMax).toLocaleString() : '...'), clear: function() {
+      var mn = document.getElementById('financialMin'); if (mn) mn.value = '';
+      var mx = document.getElementById('financialMax'); if (mx) mx.value = '';
+      document.querySelectorAll('.financial-preset-btn').forEach(function(b) { b.classList.remove('active'); });
+    }});
+  }
+  
+  if (tags.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = '';
+  tags.forEach(function(tag) {
+    var el = document.createElement('span');
+    el.className = 'active-filter-tag';
+    el.innerHTML = tag.label + ' <button class="remove-filter">&times;</button>';
+    el.querySelector('.remove-filter').addEventListener('click', function() {
+      tag.clear();
+      applyFilters();
+    });
+    list.appendChild(el);
+  });
 }
 
 // ---- Export ----
@@ -459,5 +622,272 @@ function showError(message) {
 function closeErrorModal() {
   var m = document.getElementById('errorModal');
   if (m) m.style.display = 'none';
+}
+
+// ============================================
+// ChartManager — Chart.js rendering (grayscale)
+// ============================================
+var ChartManager = {
+  chartInstances: { status: null, organization: null, timeline: null, trends: null },
+  grayscaleColors: ['#1d1d1f', '#333', '#555', '#666', '#86868b', '#999', '#a1a1a6', '#d2d2d7'],
+
+  getGrayscaleColor: function(index) {
+    return this.grayscaleColors[index % this.grayscaleColors.length];
+  },
+
+  destroy: function() {
+    for (var key in this.chartInstances) {
+      if (this.chartInstances[key]) {
+        this.chartInstances[key].destroy();
+        this.chartInstances[key] = null;
+      }
+    }
+  },
+
+  init: function(data) {
+    this.destroy();
+    this.chartInstances.status = this.createStatusChart(data);
+    this.chartInstances.organization = this.createOrganizationChart(data);
+    this.chartInstances.timeline = this.createTimelineChart(data);
+    this.chartInstances.trends = this.createTrendsChart(data);
+  },
+
+  updateAll: function(data) {
+    this.init(data);
+    // Flash the indicator
+    var ind = document.getElementById('chartUpdateIndicator');
+    if (ind) {
+      ind.textContent = 'Updated';
+      ind.classList.add('updated');
+      setTimeout(function() { ind.textContent = 'Ready'; ind.classList.remove('updated'); }, 1500);
+    }
+  },
+
+  showEmpty: function(canvasId) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    var parent = canvas.parentElement;
+    canvas.style.display = 'none';
+    var existing = parent.querySelector('.chart-empty');
+    if (!existing) {
+      var msg = document.createElement('div');
+      msg.className = 'chart-empty';
+      msg.textContent = 'No data available';
+      parent.appendChild(msg);
+    }
+    return null;
+  },
+
+  clearEmpty: function(canvasId) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    canvas.style.display = '';
+    var parent = canvas.parentElement;
+    var existing = parent.querySelector('.chart-empty');
+    if (existing) existing.remove();
+  },
+
+  createStatusChart: function(data) {
+    var counts = {};
+    for (var i = 0; i < data.length; i++) {
+      var s = String(data[i].AWARD_STATUS || 'Unknown');
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    var labels = Object.keys(counts);
+    if (labels.length === 0) return this.showEmpty('statusChart');
+    this.clearEmpty('statusChart');
+    var canvas = document.getElementById('statusChart');
+    if (!canvas) return null;
+    var self = this;
+    try {
+      return new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{ data: labels.map(function(l) { return counts[l]; }),
+            backgroundColor: labels.map(function(_, i) { return self.getGrayscaleColor(i); }),
+            borderColor: '#fff', borderWidth: 2 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: true,
+          plugins: { legend: { position: 'bottom', labels: { font: { family: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif' }, color: '#666' } } }
+        }
+      });
+    } catch(e) { debugLog('Chart error (status): ' + e.message); return this.showEmpty('statusChart'); }
+  },
+
+  createOrganizationChart: function(data) {
+    var sums = {};
+    for (var i = 0; i < data.length; i++) {
+      var org = String(data[i].Client_Bureau || data[i].client_organization || 'Unknown');
+      sums[org] = (sums[org] || 0) + (parseFloat(data[i].CEILING) || 0);
+    }
+    var entries = Object.keys(sums).map(function(o) { return { org: o, total: sums[o] }; });
+    entries.sort(function(a, b) { return b.total - a.total; });
+    entries = entries.slice(0, 10);
+    if (entries.length === 0) return this.showEmpty('organizationChart');
+    this.clearEmpty('organizationChart');
+    var canvas = document.getElementById('organizationChart');
+    if (!canvas) return null;
+    var self = this;
+    try {
+      return new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: entries.map(function(e) { return e.org; }),
+          datasets: [{ label: 'Ceiling Value', data: entries.map(function(e) { return e.total; }),
+            backgroundColor: entries.map(function(_, i) { return self.getGrayscaleColor(i); }),
+            borderColor: '#1d1d1f', borderWidth: 1 }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { callback: function(v) { return formatMoney(v); }, color: '#666', font: { family: '-apple-system, sans-serif' } }, grid: { color: '#e8e8ed' } },
+            y: { ticks: { color: '#666', font: { family: '-apple-system, sans-serif' } }, grid: { display: false } }
+          }
+        }
+      });
+    } catch(e) { debugLog('Chart error (org): ' + e.message); return this.showEmpty('organizationChart'); }
+  },
+
+  createTimelineChart: function(data) {
+    var counts = {};
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i].PROJECT_START;
+      if (!d) continue;
+      var year = new Date(d).getFullYear();
+      if (isNaN(year)) continue;
+      counts[year] = (counts[year] || 0) + 1;
+    }
+    var years = Object.keys(counts).map(Number).sort(function(a,b){return a-b;});
+    if (years.length === 0) return this.showEmpty('timelineChart');
+    this.clearEmpty('timelineChart');
+    var canvas = document.getElementById('timelineChart');
+    if (!canvas) return null;
+    try {
+      return new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: years.map(String),
+          datasets: [{ label: 'Contracts', data: years.map(function(y) { return counts[y]; }),
+            backgroundColor: '#555', borderColor: '#333', borderWidth: 1 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#666' }, grid: { color: '#e8e8ed' } },
+            y: { ticks: { color: '#666' }, grid: { color: '#e8e8ed' }, beginAtZero: true }
+          }
+        }
+      });
+    } catch(e) { debugLog('Chart error (timeline): ' + e.message); return this.showEmpty('timelineChart'); }
+  },
+
+  createTrendsChart: function(data) {
+    var sums = {};
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i].PROJECT_START;
+      if (!d) continue;
+      var year = new Date(d).getFullYear();
+      if (isNaN(year)) continue;
+      sums[year] = (sums[year] || 0) + (parseFloat(data[i].CEILING) || 0);
+    }
+    var years = Object.keys(sums).map(Number).sort(function(a,b){return a-b;});
+    if (years.length === 0) return this.showEmpty('trendsChart');
+    this.clearEmpty('trendsChart');
+    var canvas = document.getElementById('trendsChart');
+    if (!canvas) return null;
+    try {
+      return new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: years.map(String),
+          datasets: [{ label: 'Total Ceiling', data: years.map(function(y) { return sums[y]; }),
+            borderColor: '#1d1d1f', backgroundColor: 'rgba(0,0,0,0.05)',
+            fill: true, tension: 0.3, pointBackgroundColor: '#333', pointBorderColor: '#1d1d1f' }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#666' }, grid: { color: '#e8e8ed' } },
+            y: { ticks: { callback: function(v) { return formatMoney(v); }, color: '#666' }, grid: { color: '#e8e8ed' } }
+          }
+        }
+      });
+    } catch(e) { debugLog('Chart error (trends): ' + e.message); return this.showEmpty('trendsChart'); }
+  }
+};
+
+// ============================================
+// Table Sorting
+// ============================================
+var currentSortColumn = null;
+var currentSortDirection = 'asc';
+
+function setupSortHandlers() {
+  var headers = document.querySelectorAll('th[data-sort]');
+  headers.forEach(function(th) {
+    th.addEventListener('click', function() {
+      var col = th.getAttribute('data-sort');
+      if (currentSortColumn === col) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        currentSortColumn = col;
+        currentSortDirection = 'asc';
+      }
+      sortFilteredData();
+      renderTable(filteredData);
+      updateSortIndicators();
+    });
+  });
+}
+
+function sortFilteredData() {
+  if (!currentSortColumn) return;
+  filteredData.sort(function(a, b) {
+    var valA = getSortValue(a, currentSortColumn);
+    var valB = getSortValue(b, currentSortColumn);
+    var cmp = compareSortValues(valA, valB, currentSortColumn);
+    return currentSortDirection === 'desc' ? -cmp : cmp;
+  });
+}
+
+function getSortValue(contract, column) {
+  switch (column) {
+    case 'award': return contract.AWARD || '';
+    case 'project': return contract.PROJECT_TITLE || contract.PROJECT || '';
+    case 'ceiling': return parseFloat(contract.CEILING) || 0;
+    case 'awardValue': return 0; // N/A column
+    case 'status': return contract.AWARD_STATUS || '';
+    case 'projectStart': return contract.PROJECT_START || '';
+    case 'projectEnd': return contract.PROJECT_END || '';
+    case 'clientBureau': return contract.Client_Bureau || contract.client_organization || '';
+    default: return '';
+  }
+}
+
+function compareSortValues(a, b, column) {
+  if (column === 'ceiling' || column === 'awardValue') return (a || 0) - (b || 0);
+  if (column === 'projectStart' || column === 'projectEnd') {
+    var da = a ? new Date(a).getTime() : 0;
+    var db = b ? new Date(b).getTime() : 0;
+    if (isNaN(da)) da = 0;
+    if (isNaN(db)) db = 0;
+    return da - db;
+  }
+  return String(a).localeCompare(String(b));
+}
+
+function updateSortIndicators() {
+  var headers = document.querySelectorAll('th[data-sort]');
+  headers.forEach(function(th) {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.getAttribute('data-sort') === currentSortColumn) {
+      th.classList.add(currentSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+  });
 }
 </script>

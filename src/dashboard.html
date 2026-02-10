@@ -27,11 +27,11 @@
                     <span class="status-text">Connected</span>
                 </div>
                 <button id="refreshBtn" class="btn btn-secondary">
-                    <span class="icon">🔄</span>
+                    <span class="icon">↻</span>
                     Refresh
                 </button>
                 <button id="exportBtn" class="btn btn-primary">
-                    <span class="icon">📊</span>
+                    <span class="icon">⬇</span>
                     Export
                 </button>
             </div>
@@ -54,8 +54,8 @@
         </div>
     </div>
 
-    <!-- Debug Log (visible on screen for troubleshooting) -->
-    <div id="debugLog" style="display:none; position:fixed; bottom:0; left:0; right:0; max-height:150px; overflow-y:auto; background:#1a1a2e; color:#0f0; font-family:monospace; font-size:11px; padding:8px; z-index:10000; border-top:2px solid #0f0;"></div>
+    <!-- Debug Log (hidden) -->
+    <div id="debugLog" style="display:none;"></div>
 
     <!-- Main Content -->
     <main class="dashboard-main">
@@ -74,7 +74,7 @@
                     <label for="searchInput">Search</label>
                     <div class="search-input-container">
                         <input type="text" id="searchInput" placeholder="Search contracts, awards, projects..." class="form-input search-input">
-                        <span class="search-icon">🔍</span>
+                        <span class="search-icon">⌕</span>
                         <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">&times;</button>
                     </div>
                     <div class="search-suggestions" id="searchSuggestions" style="display: none;"></div>
@@ -175,31 +175,31 @@
         <section class="summary-section">
             <div class="summary-cards">
                 <div class="summary-card">
-                    <div class="card-icon">💰</div>
+                    <div class="card-icon">$</div>
                     <div class="card-content">
                         <h3>Total Contract Value</h3>
                         <p class="card-value currency" id="totalValue">$0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">📋</div>
+                    <div class="card-icon">■</div>
                     <div class="card-content">
                         <h3>Active Contracts</h3>
                         <p class="card-value count" id="activeCount">0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">✅</div>
+                    <div class="card-icon">✓</div>
                     <div class="card-content">
                         <h3>Completed Contracts</h3>
                         <p class="card-value count" id="completedCount">0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">📈</div>
+                    <div class="card-icon">≡</div>
                     <div class="card-content">
-                        <h3>Budget Utilization</h3>
-                        <p class="card-value percentage" id="budgetUtilization">0%</p>
+                        <h3>Total Contracts</h3>
+                        <p class="card-value percentage" id="budgetUtilization">0</p>
                     </div>
                 </div>
             </div>
@@ -328,7 +328,7 @@
                     <div class="export-options">
                         <label>
                             <input type="radio" name="exportFormat" value="csv" checked>
-                            <span class="format-icon">📄</span>
+                            <span class="format-icon">▤</span>
                             <div class="format-details">
                                 <strong>CSV (Comma Separated Values)</strong>
                                 <small>Best for data analysis and spreadsheet applications</small>
@@ -336,7 +336,7 @@
                         </label>
                         <label>
                             <input type="radio" name="exportFormat" value="excel">
-                            <span class="format-icon">📊</span>
+                            <span class="format-icon">▦</span>
                             <div class="format-details">
                                 <strong>Excel Workbook</strong>
                                 <small>Formatted spreadsheet with multiple sheets</small>
@@ -344,7 +344,7 @@
                         </label>
                         <label>
                             <input type="radio" name="exportFormat" value="pdf">
-                            <span class="format-icon">📋</span>
+                            <span class="format-icon">▧</span>
                             <div class="format-details">
                                 <strong>PDF Report</strong>
                                 <small>Professional report with charts and summaries</small>
@@ -375,7 +375,7 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeExportModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="performExport()">
-                    <span class="icon">⬇️</span>
+                    <span class="icon">⬇</span>
                     Export Data
                 </button>
             </div>

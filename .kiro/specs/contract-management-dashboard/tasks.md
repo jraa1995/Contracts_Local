@@ -1,331 +1,149 @@
-# Implementation Plan: Contract Management Dashboard
+# Implementation Plan: Contract Management Dashboard Redesign
 
 ## Overview
 
-This implementation plan breaks down the contract management dashboard into discrete coding tasks that build incrementally. Each task focuses on implementing specific components while ensuring integration with previous work. The plan emphasizes early validation through testing and includes checkpoints for user feedback.
+Rewrite the client-side CSS, add Chart.js rendering, fix debug log, wire up all filters, fix table column duplication, and add sorting — all within the existing GAS `.html` file structure. Server-side `Code.js` is not modified.
 
 ## Tasks
 
-- [x] 1. Set up Google Apps Script project structure and core data models
-  - Create project directory structure with separate files for services, controllers, and utilities
-  - Define TypeScript-style interfaces and data models for ContractData, PersonnelInfo, and FilterCriteria
-  - Set up Google Apps Script project configuration for clasp deployment
-  - Create basic HTML template for the dashboard interface
-  - _Requirements: 10.1, 10.4_
+- [x] 1. Rewrite styles.html with Apple-inspired grayscale design system
+  - [x] 1.1 Define CSS custom properties (grayscale palette, typography, shadows, radii, transitions) on `:root` and rewrite reset/base styles, body, and header with dark gradient (#000 → #1d1d1f)
+    - Replace the entire `<style>` block in `styles.html`
+    - Define all `--color-*`, `--font-family`, `--shadow-*`, `--radius-*`, `--transition` variables
+    - Style `.dashboard-header` with grayscale gradient, `.nav-btn` with grayscale hover/active states
+    - Style `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-link` in grayscale
+    - Style `.connection-status` indicator in grayscale (no green/red/yellow)
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
 
-- [x] 2. Implement core data processing service
-  - [x] 2.1 Create DataService class for Google Sheets integration
-    - Implement loadContractData() method to read from Google Sheets
-    - Add data validation and transformation logic for raw sheet data
-    - Handle Google Sheets API authentication and error cases
-    - _Requirements: 1.1, 10.2_
-  
-  - [ ]* 2.2 Write property test for complete field parsing
-    - **Property 1: Complete field parsing**
-    - **Validates: Requirements 1.1**
-  
-  - [x] 2.3 Implement financial data processing
-    - Create currency parsing functions to convert formatted strings to numbers
-    - Add validation for financial data ranges and relationships
-    - Implement error handling for invalid financial formats
-    - _Requirements: 1.2_
-  
-  - [ ]* 2.4 Write property test for currency format conversion
-    - **Property 2: Currency format conversion**
-    - **Validates: Requirements 1.2**
-  
-  - [x] 2.5 Implement date processing and validation
-    - Create date parsing functions for multiple input formats
-    - Add date validation and standardization logic
-    - Handle timezone considerations and edge cases
-    - _Requirements: 1.3_
-  
-  - [ ]* 2.6 Write property test for date format standardization
-    - **Property 3: Date format standardization**
-    - **Validates: Requirements 1.3**
+  - [x] 1.2 Style loading overlay, filter panel, and summary cards in grayscale
+    - `.loading-overlay`, `.spinner`, `.progress-fill` — all grayscale
+    - `.filters-section`, `.form-input`, `.form-select` — grayscale borders and focus states
+    - `.date-preset-btn`, `.financial-preset-btn` — grayscale active states (no blue/green)
+    - `.active-filter-tag` — gray background/border instead of blue
+    - `.summary-card`, `.card-icon` — grayscale backgrounds, no colored gradients
+    - `.card-value` — all grayscale text (no green/blue/purple)
+    - _Requirements: 1.1, 1.6, 5.8, 6.1, 6.2, 7.1, 7.2_
 
-- [x] 3. Implement error handling and data quality reporting
-  - [x] 3.1 Create error logging and reporting system
-    - Implement ValidationResult class for data quality tracking
-    - Add comprehensive error logging with specific field and row information
-    - Create data quality report generation functionality
-    - _Requirements: 1.4_
-  
-  - [ ]* 3.2 Write property test for error logging
-    - **Property 4: Error logging for invalid data**
-    - **Validates: Requirements 1.4**
-  
-  - [x] 3.3 Implement robust null and empty value handling
-    - Add null-safe data processing throughout the system
-    - Implement graceful degradation for missing optional fields
-    - Create fallback values and default handling strategies
-    - _Requirements: 1.5_
-  
-  - [ ]* 3.4 Write property test for graceful null handling
-    - **Property 5: Graceful null handling**
-    - **Validates: Requirements 1.5**
+  - [x] 1.3 Style charts section, data table, status badges, pagination, and modals in grayscale
+    - `.chart-container`, `.charts-grid` — white cards with subtle shadows
+    - `.data-table th` — grayscale header background
+    - `.status-badge` variants (`.status-active`, `.status-completed`, `.status-pending`, `.status-cancelled`) — distinct grayscale shades only
+    - `.currency-value` — grayscale text (no green/red)
+    - `.page-number.active` — dark gray instead of blue
+    - `.modal`, `.modal-content`, `.export-options` — all grayscale
+    - Responsive breakpoints at 768px and 480px
+    - _Requirements: 1.1, 1.6, 8.1, 8.2, 8.3, 9.1, 9.2_
 
-- [x] 4. Checkpoint - Ensure data processing tests pass
-  - Ensure all data processing tests pass, ask the user if questions arise.
+- [x] 2. Fix debug log and table column duplication in scripts.html
+  - [x] 2.1 Modify `debugLog()` to console-only output and fix Award Value column in `renderTable()`
+    - Change `debugLog` to only call `console.log(msg)` — remove all DOM element references and `el.style.display = 'block'`
+    - In `renderTable()`, change the Award Value `<td>` from `formatMoney(parseFloat(c.CEILING) || 0)` to the string `'N/A'`
+    - _Requirements: 2.1, 2.2, 2.3, 4.1, 4.2, 4.3_
 
-- [x] 5. Implement financial analysis service
-  - [x] 5.1 Create FinancialAnalyzer class
-    - Implement calculateTotalValues() for contract value summations
-    - Add budget utilization calculations and remaining budget logic
-    - Create spending analysis by organization, sector, and time period
-    - _Requirements: 4.1, 4.3_
-  
-  - [ ]* 5.2 Write property test for financial calculation accuracy
-    - **Property 14: Financial calculation accuracy**
-    - **Validates: Requirements 4.1**
-  
-  - [x] 5.3 Implement multi-year contract handling
-    - Add logic for time-based budget allocations
-    - Handle fiscal year calculations and multi-year distributions
-    - Implement complex contract modification tracking
-    - _Requirements: 4.2_
-  
-  - [ ]* 5.4 Write property test for multi-year contract handling
-    - **Property 15: Multi-year contract handling**
-    - **Validates: Requirements 4.2**
-  
-  - [x] 5.5 Implement risk analysis and threshold detection
-    - Create ceiling value monitoring and overrun detection
-    - Add financial risk assessment algorithms
-    - Implement automated flagging for contracts approaching limits
-    - _Requirements: 4.4_
-  
-  - [ ]* 5.6 Write property test for ceiling threshold detection
-    - **Property 17: Ceiling threshold detection**
-    - **Validates: Requirements 4.4**
+  - [x] 2.2 Write property test for table column non-duplication
+    - **Property 5: Table column non-duplication**
+    - **Validates: Requirements 4.1, 4.2**
 
-- [x] 6. Implement personnel management service
-  - [x] 6.1 Create PersonnelManager class
-    - Implement personnel assignment tracking and validation
-    - Add workload distribution calculations
-    - Create organizational hierarchy management
-    - _Requirements: 5.1, 5.3_
-  
-  - [ ]* 6.2 Write property test for personnel role completeness
-    - **Property 18: Personnel role completeness**
-    - **Validates: Requirements 5.1**
-  
-  - [x] 6.3 Implement personnel information management
-    - Add contact information validation and formatting
-    - Implement personnel-contract assignment tracking
-    - Create personnel workload analysis and reporting
-    - _Requirements: 5.2, 5.3_
-  
-  - [ ]* 6.4 Write property test for workload calculation accuracy
-    - **Property 20: Workload calculation accuracy**
-    - **Validates: Requirements 5.3**
+- [x] 3. Implement Chart.js rendering in scripts.html
+  - [x] 3.1 Create ChartManager object with grayscale color palette and chart instance tracking
+    - Define `ChartManager` with `chartInstances` object, `grayscaleColors` array, `init(data)`, `updateAll(data)`, and `destroy()` methods
+    - Implement `getGrayscaleColor(index)` helper
+    - _Requirements: 3.5_
 
-- [x] 7. Implement timeline tracking service
-  - [x] 7.1 Create Timeline_Tracker class
-    - Implement date calculations for days remaining and overdue contracts
-    - Add milestone tracking and completion status management
-    - Create deadline monitoring and alert generation
-    - _Requirements: 6.1, 6.2, 6.5_
-  
-  - [ ]* 7.2 Write property test for days remaining calculation
-    - **Property 23: Days remaining calculation accuracy**
-    - **Validates: Requirements 6.2**
-  
-  - [x] 7.3 Implement deadline highlighting and alerts
-    - Add logic for identifying contracts approaching completion
-    - Implement alert generation for overdue and upcoming deadlines
-    - Create priority-based highlighting system
-    - _Requirements: 6.3, 6.5_
-  
-  - [ ]* 7.4 Write property test for deadline alert generation
-    - **Property 26: Deadline alert generation**
-    - **Validates: Requirements 6.5**
+  - [x] 3.2 Implement `createStatusChart(data)` — donut chart of AWARD_STATUS counts
+    - Aggregate contract counts by AWARD_STATUS
+    - Create Chart.js doughnut chart with grayscale fills
+    - Handle empty data case with "No data available" message
+    - _Requirements: 3.1, 3.7_
 
-- [x] 8. Checkpoint - Ensure all service layer tests pass
-  - Ensure all service layer tests pass, ask the user if questions arise.
-
-- [x] 9. Implement filtering and search functionality
-  - [x] 9.1 Create FilterController class
-    - Implement multi-field text search across contract identifiers and titles
-    - Add dropdown filter logic for categorical data
-    - Create date range filtering for timeline fields
-    - _Requirements: 3.1, 3.4_
-  
-  - [ ]* 9.2 Write property test for multi-field search coverage
-    - **Property 10: Multi-field search coverage**
-    - **Validates: Requirements 3.1**
-  
-  - [x] 9.3 Implement filter combination logic
-    - Add logical AND operations for multiple simultaneous filters
-    - Implement filter state management and persistence
-    - Create filter clearing and reset functionality
-    - _Requirements: 3.3_
-  
-  - [ ]* 9.4 Write property test for filter combination logic
-    - **Property 11: Filter combination logic**
-    - **Validates: Requirements 3.3**
-  
-  - [x] 9.5 Implement personnel-based filtering
-    - Add filtering by specific personnel assignments
-    - Create personnel workload filtering capabilities
-    - Implement role-based contract filtering
-    - _Requirements: 5.4_
-  
-  - [ ]* 9.6 Write property test for personnel filtering accuracy
-    - **Property 21: Personnel filtering accuracy**
-    - **Validates: Requirements 5.4**
-
-- [x] 10. Implement visualization engine
-  - [x] 10.1 Create VisualizationManager class using Chart.js
-    - Set up Chart.js integration in Google Apps Script HTML Service
-    - Implement financial charts for contract values and budget analysis
-    - Create organizational charts for contract distribution
-    - _Requirements: 2.3_
-  
-  - [ ]* 10.2 Write property test for chart generation completeness
-    - **Property 7: Chart generation completeness**
-    - **Validates: Requirements 2.3**
-  
-  - [x] 10.3 Implement timeline visualizations
-    - Create Gantt-style charts for contract timelines
-    - Add milestone and completion status visualizations
-    - Implement interactive timeline navigation
-    - _Requirements: 2.4, 6.4_
-  
-  - [ ]* 10.4 Write property test for timeline visualization completeness
-    - **Property 25: Timeline visualization completeness**
-    - **Validates: Requirements 6.4**
-  
-  - [x] 10.5 Implement reactive visualization updates
-    - Add automatic chart refresh when data changes
-    - Implement filter-responsive visualization updates
-    - Create smooth transitions and animations for chart updates
-    - _Requirements: 2.5, 3.5_
-  
-  - [ ]* 10.6 Write property test for visualization reactivity
-    - **Property 9: Visualization reactivity**
-    - **Validates: Requirements 2.5**
-
-- [x] 11. Implement dashboard user interface
-  - [x] 11.1 Create main dashboard HTML template
-    - Design responsive layout for desktop and tablet viewing
-    - Implement navigation structure and component organization
-    - Add loading states and progress indicators
-    - _Requirements: 8.1, 8.3_
-  
-  - [x] 11.2 Implement data table management
-    - Create DataTableManager class for tabular data display
-    - Add sorting, pagination, and column management
-    - Implement responsive table design with horizontal scrolling
-    - _Requirements: 2.1_
-  
-  - [x] 11.3 Create filter interface components
-    - Implement search input with debounced text search
-    - Add dropdown filters for categorical data
-    - Create date range picker components
+  - [x] 3.3 Implement `createOrganizationChart(data)` — horizontal bar chart of CEILING by Client_Bureau (top 10)
+    - Sum CEILING values grouped by Client_Bureau
+    - Sort descending, take top 10
+    - Create Chart.js horizontal bar chart with grayscale fills
     - _Requirements: 3.2_
-  
-  - [x] 11.4 Implement financial data formatting
-    - Add currency formatting with symbols and decimal places
-    - Create consistent number formatting throughout the interface
-    - Implement locale-aware formatting for international use
-    - _Requirements: 2.2_
-  
-  - [ ]* 11.5 Write property test for currency formatting consistency
-    - **Property 6: Currency formatting consistency**
-    - **Validates: Requirements 2.2**
 
-- [x] 12. Implement export and reporting functionality
-  - [x] 12.1 Create ExportService class
-    - Implement CSV export with filtered data and all visible columns
-    - Add PDF report generation with visualizations
-    - Create Excel export functionality for complex data analysis
-    - _Requirements: 7.1, 7.2_
-  
-  - [ ]* 12.2 Write property test for CSV export completeness
-    - **Property 27: CSV export completeness**
-    - **Validates: Requirements 7.1**
-  
-  - [x] 12.3 Implement export formatting and metadata
-    - Add format preservation for financial values and dates in exports
-    - Include filter criteria and timestamp metadata in exports
-    - Create export configuration options for different use cases
-    - _Requirements: 7.3, 7.4_
-  
-  - [ ]* 12.4 Write property test for export format preservation
-    - **Property 29: Export format preservation**
-    - **Validates: Requirements 7.3**
+  - [x] 3.4 Implement `createTimelineChart(data)` and `createTrendsChart(data)`
+    - Timeline: count contracts by PROJECT_START year, render as bar chart
+    - Trends: sum CEILING by PROJECT_START year, render as line chart
+    - Both use grayscale colors and handle empty data
+    - _Requirements: 3.3, 3.4_
 
-- [x] 13. Implement access control and security
-  - [x] 13.1 Create AccessController class
-    - Implement Google Workspace authentication integration
-    - Add role-based permission checking for data access
-    - Create session management and timeout handling
-    - _Requirements: 9.1, 9.2_
-  
-  - [ ]* 13.2 Write property test for authentication integration
-    - **Property 31: Authentication integration**
-    - **Validates: Requirements 9.1**
-  
-  - [x] 13.3 Implement security logging and audit trails
-    - Add comprehensive audit logging for user activities
-    - Implement unauthorized access detection and logging
-    - Create security event monitoring and reporting
-    - _Requirements: 9.3, 9.4_
-  
-  - [ ]* 13.4 Write property test for unauthorized access handling
-    - **Property 33: Unauthorized access handling**
-    - **Validates: Requirements 9.3**
+  - [x] 3.5 Wire ChartManager into `finishLoading()` and `applyFilters()` so charts render on load and update on filter
+    - Call `ChartManager.init(filteredData)` in `finishLoading()`
+    - Call `ChartManager.updateAll(filteredData)` at the end of `applyFilters()`
+    - _Requirements: 3.6_
 
-- [x] 14. Implement Google Apps Script optimization
-  - [x] 14.1 Add execution time and quota management
-    - Implement batch processing for large datasets
-    - Add execution time monitoring and automatic batching
-    - Create graceful handling of Google Apps Script limits
-    - _Requirements: 10.5_
-  
-  - [ ]* 14.2 Write property test for quota limit handling
-    - **Property 36: Quota limit handling**
-    - **Validates: Requirements 10.5**
-  
-  - [x] 14.3 Optimize Google Sheets API integration
-    - Implement efficient data loading with minimal API calls
-    - Add caching strategies for frequently accessed data
-    - Create error handling and retry logic for API failures
-    - _Requirements: 10.2_
-  
-  - [ ]* 14.4 Write property test for Google Sheets API integration
-    - **Property 35: Google Sheets API integration**
-    - **Validates: Requirements 10.2**
+  - [x] 3.6 Write property tests for chart aggregation functions
+    - **Property 1: Status chart aggregation correctness**
+    - **Property 2: Organization chart aggregation correctness**
+    - **Property 3: Timeline chart aggregation correctness**
+    - **Property 4: Trends chart aggregation correctness**
+    - **Validates: Requirements 3.1, 3.2, 3.3, 3.4**
 
-- [x] 15. Integration and final wiring
-  - [x] 15.1 Wire all components together
-    - Connect data services to visualization components
-    - Integrate filtering with all dashboard components
-    - Link export functionality to filtered data and visualizations
-    - _Requirements: All requirements integration_
-  
-  - [x] 15.2 Implement main application controller
-    - Create DashboardController to coordinate all components
-    - Add application initialization and startup logic
-    - Implement error handling and recovery at the application level
-    - _Requirements: All requirements integration_
-  
-  - [ ]* 15.3 Write integration tests for end-to-end functionality
-    - Test complete user workflows from data loading to export
-    - Validate filter-visualization-export integration
-    - Test error handling across component boundaries
-
-- [x] 16. Final checkpoint - Ensure all tests pass and system is ready
+- [x] 4. Checkpoint — Verify styles, charts, debug log fix, and column fix
   - Ensure all tests pass, ask the user if questions arise.
-  - Verify clasp deployment configuration
-  - Test complete system functionality with sample data
+
+- [x] 5. Wire up remaining filters (date range, financial range, presets, active tags)
+  - [x] 5.1 Extend `applyFilters()` with date range and financial range filtering logic
+    - Read `dateFieldSelect`, `dateRangeStart`, `dateRangeEnd` — filter contracts by comparing the selected date field
+    - Read `financialMin`, `financialMax` — filter contracts by CEILING within range
+    - Add date and financial inputs to the event listener setup in `setupEventListeners()`
+    - _Requirements: 5.2, 5.4_
+
+  - [x] 5.2 Implement date preset and financial preset click handlers
+    - `.date-preset-btn` click: compute start/end dates (Last 30 days, Last 90 days, This Year), set input values, call `applyFilters()`
+    - `.financial-preset-btn` click: set min/max values (Under $100K, $100K-$1M, Over $1M), call `applyFilters()`
+    - _Requirements: 5.3, 5.5_
+
+  - [x] 5.3 Implement active filter tag display and individual filter removal
+    - After `applyFilters()`, build tag elements in `#activeFiltersList` for each active filter
+    - Each tag has a remove button that clears that specific filter and re-applies
+    - Show/hide `#activeFilters` container based on whether any filters are active
+    - _Requirements: 5.6, 5.7_
+
+  - [x] 5.4 Write property tests for filter correctness
+    - **Property 6: Multi-select filter correctness**
+    - **Property 7: Date range filter correctness**
+    - **Property 8: Financial range filter correctness**
+    - **Property 9: Clear all filter round-trip**
+    - **Validates: Requirements 5.1, 5.2, 5.4, 5.7**
+
+- [x] 6. Implement table column sorting
+  - [x] 6.1 Add sort click handlers on `th[data-sort]` elements and implement sort logic
+    - Track `currentSortColumn` and `currentSortDirection` in state
+    - On header click: toggle direction if same column, else set ascending
+    - Sort `filteredData` using type-aware comparator (string, number, date)
+    - Re-render table after sort
+    - Update `th` classes (`.sort-asc`, `.sort-desc`) for visual indicator
+    - _Requirements: 10.1, 10.2, 10.3_
+
+  - [x] 6.2 Write property test for table sorting
+    - **Property 11: Table sorting correctness**
+    - **Validates: Requirements 10.1, 10.2**
+
+- [x] 7. Wire summary card updates and final integration
+  - [x] 7.1 Ensure `updateSummaryCards()` is called after every filter/sort operation and correctly computes totals from `filteredData`
+    - Verify it's called in `applyFilters()` (already exists) and after sort
+    - _Requirements: 6.3_
+
+  - [x] 7.2 Write property test for summary card totals
+    - **Property 10: Summary cards reflect filtered totals**
+    - **Validates: Requirements 6.3**
+
+- [x] 8. Minor dashboard.html tweaks
+  - [x] 8.1 Update dashboard.html: remove or permanently hide debug log div, replace emoji icons in summary cards with grayscale SVG or text icons
+    - Remove `style="display:none; ..."` inline styles on `#debugLog` — either remove the div entirely or set `display:none` without the green-on-dark styling
+    - Replace emoji icons (💰📋✅📈🔄📊🔍) with simple text labels or grayscale Unicode symbols
+    - _Requirements: 2.1, 6.2_
+
+- [x] 9. Final checkpoint — Full integration verification
+  - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
 
-- Tasks marked with `*` are optional and can be skipped for faster MVP
+- Tasks are all required — property tests included for comprehensive coverage
 - Each task references specific requirements for traceability
-- Property tests validate universal correctness properties using JSVerify library
-- Integration tests ensure components work together correctly
-- Google Apps Script specific optimizations are included throughout
-- Checkpoints ensure incremental validation and user feedback opportunities
+- `src/Code.js` and all server-side files are not modified
+- All changes are in `src/styles.html`, `src/scripts.html`, and `src/dashboard.html`
+- Property tests validate universal correctness properties using fast-check
+- Unit tests validate specific examples and edge cases

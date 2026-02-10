@@ -1,527 +1,348 @@
-# Design Document: Contract Management Dashboard
+# Design Document: Contract Management Dashboard Redesign
 
 ## Overview
 
-The Contract Management Dashboard is a web-based application built on Google Apps Script that transforms contract data from Google Sheets into an interactive, visual management interface. The system employs a client-server architecture where Google Apps Script serves as the backend processing engine and HTML/CSS/JavaScript provides the frontend dashboard interface.
+This design covers the Apple-inspired UI/UX overhaul of the Contract Management Dashboard — a Google Apps Script web app that reads ~9,159 contract rows from a Google Sheet and renders them client-side. The redesign touches three files: `styles.html` (complete CSS rewrite), `scripts.html` (chart rendering, filter wiring, debug log fix, table column fix, sorting), and `dashboard.html` (minor structural tweaks). The server-side data pipeline in `Code.js` remains untouched.
 
-The design emphasizes real-time data processing, responsive visualizations, and intuitive user interactions while working within Google Apps Script's execution constraints. The system processes structured contract data containing financial metrics, personnel assignments, timeline information, and compliance details to deliver actionable insights through charts, filters, and analytical tools.
+The core changes are:
+1. Replace all CSS with an Apple-inspired grayscale design system
+2. Implement Chart.js rendering for four chart types
+3. Fix the debug log to be console-only
+4. Wire up date range, financial range, and preset filters
+5. Fix the duplicate CEILING column in the data table
+6. Add column sorting to the data table
 
 ## Architecture
 
-The system follows a layered architecture pattern optimized for Google Apps Script:
+The application follows a simple client-server architecture within the Google Apps Script framework:
 
-```
-┌─────────────────────────────────────────┐
-│           Frontend Layer                │
-│  ┌─────────────────────────────────────┐ │
-│  │     Dashboard UI (HTML/CSS/JS)      │ │
-│  │  ┌─────────────┐ ┌─────────────────┐ │ │
-│  │  │ Visualizations│ │ Filter Controls │ │ │
-│  │  └─────────────┘ └─────────────────┘ │ │
-│  └─────────────────────────────────────┘ │
-└─────────────────────────────────────────┘
-                    │
-                    │ HTML Service
-                    ▼
-┌─────────────────────────────────────────┐
-│        Google Apps Script Layer         │
-│  ┌─────────────────────────────────────┐ │
-│  │        API Controllers              │ │
-│  │  ┌─────────────┐ ┌─────────────────┐ │ │
-│  │  │ Data API    │ │ Export API      │ │ │
-│  │  └─────────────┘ └─────────────────┘ │ │
-│  └─────────────────────────────────────┘ │
-│  ┌─────────────────────────────────────┐ │
-│  │        Service Layer               │ │
-│  │  ┌─────────────┐ ┌─────────────────┐ │ │
-│  │  │Data Processor│ │Financial Calc   │ │ │
-│  │  └─────────────┘ └─────────────────┘ │ │
-│  └─────────────────────────────────────┘ │
-└─────────────────────────────────────────┘
-                    │
-                    │ Sheets API
-                    ▼
-┌─────────────────────────────────────────┐
-│          Data Layer                     │
-│  ┌─────────────────────────────────────┐ │
-│  │        Google Sheets                │ │
-│  │     (Contract Data Storage)         │ │
-│  └─────────────────────────────────────┘ │
-└─────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[Google Sheet - AL_Extract] -->|Server-side GAS| B[Code.js - Data Pipeline]
+    B -->|google.script.run| C[scripts.html - Client JS]
+    C --> D[dashboard.html - DOM]
+    E[styles.html - CSS] --> D
+    C -->|Chart.js API| F[Canvas Elements]
+    C -->|DOM manipulation| G[Data Table]
+    C -->|DOM manipulation| H[Filter Panel]
+    C -->|DOM manipulation| I[Summary Cards]
 ```
 
-**Key Architectural Decisions:**
-- **Single-page application**: Minimizes Google Apps Script execution overhead
-- **Client-side rendering**: Reduces server calls and improves responsiveness
-- **Batch data loading**: Loads all data once to work within execution time limits
-- **Stateless server**: Each API call is independent to handle GAS constraints
+The architecture is entirely client-side rendering. The server sends raw JSON objects; all filtering, sorting, charting, and display logic lives in `scripts.html`. The CSS in `styles.html` is a standalone stylesheet with no dependencies beyond the system font stack.
+
+### File Responsibilities
+
+| File | Role | Changes |
+|------|------|---------|
+| `src/styles.html` | All CSS styles | Complete rewrite — grayscale palette, Apple typography, frosted glass effects |
+| `src/scripts.html` | Client-side JS | Add chart rendering, fix debug log, wire filters, fix table columns, add sorting |
+| `src/dashboard.html` | HTML structure | Minor tweaks — remove debug log visibility, adjust summary card icons |
+| `src/Code.js` | Server-side data | No changes |
 
 ## Components and Interfaces
 
-### Frontend Components
+### 1. Style System (styles.html)
 
-**DashboardController**
-- Manages overall application state and coordination between components
-- Handles user authentication and session management
-- Coordinates data loading and error handling
+The CSS is organized into these logical sections:
 
-```javascript
-interface DashboardController {
-  initialize(): void
-  loadData(): Promise<ContractData[]>
-  handleError(error: Error): void
-  refreshDashboard(): void
+- **CSS Custom Properties**: Define the grayscale palette and typography as CSS variables on `:root`
+- **Reset & Base**: Box-sizing reset, body font/color/background
+- **Header**: Dark gradient header (#000 → #1d1d1f), white text, nav buttons with grayscale hover states
+- **Loading Overlay**: Grayscale spinner and progress bar
+- **Filter Panel**: Consistent input styling, grayscale preset buttons, active filter tags in gray
+- **Summary Cards**: Grayscale icon containers, subtle shadows, no colored gradients
+- **Chart Section**: White card containers with subtle shadows
+- **Data Table**: Grayscale header, alternating row shading, grayscale status badges
+- **Pagination**: Grayscale page number buttons
+- **Modals**: Grayscale overlay, card-style modal with subtle shadow
+- **Responsive Breakpoints**: 768px and 480px breakpoints
+
+CSS Variable Definitions:
+```css
+:root {
+  --color-black: #000;
+  --color-gray-900: #111;
+  --color-gray-850: #1d1d1f;
+  --color-gray-800: #333;
+  --color-gray-700: #555;
+  --color-gray-600: #666;
+  --color-gray-500: #86868b;
+  --color-gray-400: #999;
+  --color-gray-350: #a1a1a6;
+  --color-gray-300: #d2d2d7;
+  --color-gray-200: #e8e8ed;
+  --color-gray-100: #f5f5f7;
+  --color-gray-50: #fafafa;
+  --color-white: #fff;
+  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --transition: 0.2s ease;
 }
 ```
 
-**VisualizationManager**
-- Creates and manages all chart visualizations using Chart.js library
-- Handles responsive chart resizing and updates
-- Manages chart interactions and drill-down capabilities
+### 2. Chart Manager (scripts.html)
 
-```javascript
-interface VisualizationManager {
-  createFinancialCharts(data: ContractData[]): void
-  createTimelineCharts(data: ContractData[]): void
-  createOrganizationalCharts(data: ContractData[]): void
-  updateCharts(filteredData: ContractData[]): void
-  exportChartImages(): string[]
-}
+A new `ChartManager` object encapsulates all Chart.js logic:
+
+```
+ChartManager
+  - chartInstances: { status, organization, timeline, trends }
+  - grayscaleColors: string[]
+  - init(data): void — creates all four charts
+  - updateAll(data): void — destroys and recreates charts with new data
+  - createStatusChart(data): Chart — donut chart of AWARD_STATUS counts
+  - createOrganizationChart(data): Chart — horizontal bar of CEILING by Client_Bureau (top 10)
+  - createTimelineChart(data): Chart — bar chart of contract count by PROJECT_START year
+  - createTrendsChart(data): Chart — line chart of total CEILING by PROJECT_START year
+  - getGrayscaleColor(index): string — returns a color from the grayscale palette
+  - destroy(): void — destroys all chart instances
 ```
 
-**FilterController**
-- Manages all filtering and search functionality
-- Maintains filter state and applies combinations
-- Provides real-time filtering with debounced search
-
+Chart color palette (grayscale only):
 ```javascript
-interface FilterController {
-  initializeFilters(data: ContractData[]): void
-  applyTextSearch(searchTerm: string): ContractData[]
-  applyDateRangeFilter(startDate: Date, endDate: Date): ContractData[]
-  applyMultiSelectFilter(field: string, values: string[]): ContractData[]
-  clearAllFilters(): void
-  getFilteredData(): ContractData[]
-}
+['#1d1d1f', '#333', '#555', '#666', '#86868b', '#999', '#a1a1a6', '#d2d2d7']
 ```
 
-**DataTableManager**
-- Handles tabular data display with sorting and pagination
-- Manages column visibility and customization
-- Provides inline editing capabilities for authorized users
+Each chart uses Chart.js v3+ API with these shared options:
+- `responsive: true`
+- `maintainAspectRatio: true`
+- Font family set to the Apple typography stack
+- Grayscale grid lines (#e8e8ed)
+- Grayscale legend text (#666)
+- No colored borders — use grayscale borders
 
-```javascript
-interface DataTableManager {
-  renderTable(data: ContractData[]): void
-  sortByColumn(column: string, direction: 'asc' | 'desc'): void
-  updatePagination(page: number, pageSize: number): void
-  exportTableData(format: 'csv' | 'excel'): void
-}
+### 3. Filter Controller (scripts.html)
+
+Extends the existing `applyFilters()` function to wire up:
+
+- **Date range filter**: Reads `dateFieldSelect` value (projectStart or projectEnd), compares `dateRangeStart`/`dateRangeEnd` against the corresponding contract field
+- **Date presets**: Click handlers on `.date-preset-btn` that compute date ranges and set the inputs
+- **Financial range filter**: Reads `financialMin`/`financialMax` and filters by CEILING value
+- **Financial presets**: Click handlers on `.financial-preset-btn` that set min/max values
+- **Active filter tags**: After filtering, renders tag elements in `#activeFiltersList` showing each active filter with a remove button
+
+### 4. Table Sorter (scripts.html)
+
+A new sorting mechanism:
+
+```
+TableSorter
+  - currentSortColumn: string | null
+  - currentSortDirection: 'asc' | 'desc'
+  - sort(data, column): data[] — sorts the data array by the given column
+  - comparator(a, b, column): number — type-aware comparison (string, number, date)
+  - updateHeaderIndicators(): void — updates th classes for sort direction display
 ```
 
-### Backend Components
+Clicking a `th[data-sort]` element triggers sorting. The sort operates on `filteredData` in-place, then re-renders the table.
 
-**DataService**
-- Primary interface for data operations
-- Handles Google Sheets integration and data caching
-- Manages data validation and transformation
+### 5. Debug Log Fix (scripts.html)
 
-```javascript
-interface DataService {
-  loadContractData(): ContractData[]
-  validateDataIntegrity(data: any[]): ValidationResult
-  transformRawData(rawData: any[]): ContractData[]
-  cacheData(data: ContractData[]): void
-  getCachedData(): ContractData[]
-}
-```
+The `debugLog` function is modified to only call `console.log()`. The DOM element reference and `el.style.display = 'block'` line are removed. The `#debugLog` div in `dashboard.html` is either removed or kept hidden with `display:none` permanently.
 
-**FinancialAnalyzer**
-- Performs financial calculations and analysis
-- Generates budget reports and spending analytics
-- Identifies financial risks and opportunities
+### 6. Table Column Fix (scripts.html)
 
-```javascript
-interface FinancialAnalyzer {
-  calculateTotalValues(contracts: ContractData[]): FinancialSummary
-  analyzeBudgetUtilization(contracts: ContractData[]): BudgetAnalysis
-  identifyFinancialRisks(contracts: ContractData[]): RiskAssessment[]
-  generateSpendingTrends(contracts: ContractData[], period: string): TrendData
-}
-```
-
-**PersonnelManager**
-- Manages personnel data and workload analysis
-- Tracks assignments and contact information
-- Generates personnel reports and organizational charts
-
-```javascript
-interface PersonnelManager {
-  getPersonnelAssignments(contracts: ContractData[]): PersonnelAssignment[]
-  calculateWorkloadDistribution(): WorkloadAnalysis
-  validateContactInformation(): ValidationResult[]
-  generateOrganizationalHierarchy(): OrgStructure
-}
-```
-
-**ExportService**
-- Handles data export in multiple formats
-- Generates reports with visualizations
-- Manages file creation and delivery
-
-```javascript
-interface ExportService {
-  exportToCSV(data: ContractData[], filters: FilterCriteria): Blob
-  generatePDFReport(data: ContractData[], charts: ChartImage[]): Blob
-  createExcelWorkbook(data: ContractData[]): Blob
-  scheduleAutomatedReports(config: ReportConfig): void
-}
-```
+In `renderTable()`, the Award Value column currently renders `formatMoney(parseFloat(c.CEILING) || 0)` — identical to the Ceiling column. This is changed to render "N/A" since no distinct award value field exists in the data pipeline.
 
 ## Data Models
 
-### Core Data Structures
+The contract data object received from the server has this shape:
 
-**ContractData**
-```javascript
-interface ContractData {
-  // Identifiers
-  award: string
-  project: string
-  solicitation: string
-  acquisition: string
-  
-  // Financial Information
-  ceiling: number
-  awardValue: number
-  remainingBudget: number
-  
-  // Personnel
-  projectManager: PersonnelInfo
-  contractingOfficer: PersonnelInfo
-  contractSpecialist: PersonnelInfo
-  programManager: PersonnelInfo
-  
-  // Timeline
-  awardDate: Date
-  projectStart: Date
-  projectEnd: Date
-  completionDate: Date
-  
-  // Organization
-  clientBureau: string
-  orgCode: string
-  sector: string
-  
-  // Contract Details
-  contractType: string
-  status: ContractStatus
-  competitionType: string
-  commerciality: string
-  
-  // Compliance and Flags
-  flags: string[]
-  securityLevel: string
-  
-  // Metadata
-  lastModified: Date
-  modificationStatus: string
+```typescript
+interface ContractRow {
+  AWARD_STATUS: string;      // e.g., "Active", "Completed"
+  APEXNAME: string;
+  EMP_ORG_SHORT_NAME: string;
+  AWARD_TITLE: string;
+  AWARD: string;             // Award number/ID
+  PROJECT: string;           // Project number
+  CONTRACT_TYPE: string;
+  CEILING: number | string;  // Ceiling value (may be string from sheet)
+  PM: string;                // Project manager
+  CO: string;                // Contracting officer
+  CS: string;                // Contract specialist
+  PROJECT_TITLE: string;
+  PROJECT_START: string;     // "yyyy-MM-dd" format
+  PROJECT_END: string;       // "yyyy-MM-dd" format
+  Client_Bureau: string;
+  client_organization: string;
+  FLAGS: string;
+  Mod_Status: string;
 }
 ```
 
-**PersonnelInfo**
-```javascript
-interface PersonnelInfo {
-  name: string
-  email: string
-  role: string
-  organization: string
-  phone?: string
+Chart aggregation models:
+
+```typescript
+interface StatusCount {
+  status: string;
+  count: number;
+}
+
+interface OrgCeiling {
+  organization: string;
+  totalCeiling: number;
+}
+
+interface YearCount {
+  year: number;
+  count: number;
+}
+
+interface YearCeiling {
+  year: number;
+  totalCeiling: number;
 }
 ```
 
-**FinancialSummary**
-```javascript
-interface FinancialSummary {
-  totalContractValue: number
-  totalCeilingValue: number
-  activeContractsValue: number
-  completedContractsValue: number
-  averageContractValue: number
-  budgetUtilization: number
+Filter state model:
+
+```typescript
+interface FilterState {
+  searchTerm: string;
+  selectedStatuses: string[];
+  selectedOrganizations: string[];
+  selectedContractTypes: string[];
+  dateField: 'projectStart' | 'projectEnd';
+  dateStart: string | null;
+  dateEnd: string | null;
+  financialMin: number | null;
+  financialMax: number | null;
 }
 ```
 
-**FilterCriteria**
-```javascript
-interface FilterCriteria {
-  searchText?: string
-  dateRange?: {
-    startDate: Date
-    endDate: Date
-    field: 'awardDate' | 'projectStart' | 'projectEnd'
-  }
-  status?: ContractStatus[]
-  organizations?: string[]
-  contractTypes?: string[]
-  personnel?: string[]
-  financialRange?: {
-    min: number
-    max: number
-    field: 'ceiling' | 'awardValue'
-  }
-}
-```
-
-### Data Validation Rules
-
-**Financial Data Validation**
-- All currency values must be non-negative numbers
-- Ceiling values must be greater than or equal to award values
-- Budget calculations must account for modifications and change orders
-
-**Date Validation**
-- Award dates must be valid dates in the past or present
-- Project start dates must be on or after award dates
-- Project end dates must be after project start dates
-- All date fields must handle various input formats consistently
-
-**Personnel Validation**
-- Email addresses must follow valid email format
-- Personnel assignments must reference valid organizational roles
-- Contact information must be current and accessible
 
 ## Correctness Properties
 
-*A property is a characteristic or behavior that should hold true across all valid executions of a system—essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
+*A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-Before defining the correctness properties, I need to analyze the acceptance criteria to determine which ones are testable as properties.
+The following properties were derived from the acceptance criteria after prework analysis and redundancy reflection. Properties that were purely visual/CSS (hover states, responsive breakpoints, modal styling) or redundant (chart re-render on filter is implied by correct aggregation + correct filtering) were excluded.
 
-### Data Processing Properties
+### Property 1: Status chart aggregation correctness
 
-**Property 1: Complete field parsing**
-*For any* valid contract data input, parsing should extract all required fields including identifiers, financial data, personnel, timelines, and compliance flags
-**Validates: Requirements 1.1**
+*For any* array of contract objects with various AWARD_STATUS values, the status chart data produced by `createStatusChart` should contain one entry per unique AWARD_STATUS, and the count for each status should equal the number of contracts with that status in the input array.
 
-**Property 2: Currency format conversion**
-*For any* financial data with currency formatting, conversion should produce valid numerical values suitable for calculations
-**Validates: Requirements 1.2**
-
-**Property 3: Date format standardization**
-*For any* date field input, processing should produce valid Date objects regardless of input format
-**Validates: Requirements 1.3**
-
-**Property 4: Error logging for invalid data**
-*For any* invalid or missing critical data, the system should log appropriate errors and generate data quality reports
-**Validates: Requirements 1.4**
-
-**Property 5: Graceful null handling**
-*For any* contract data containing empty cells or null values, processing should complete without system failure
-**Validates: Requirements 1.5**
-
-### Visualization Properties
-
-**Property 6: Currency formatting consistency**
-*For any* financial value displayed, formatting should include appropriate currency symbols and decimal places
-**Validates: Requirements 2.2**
-
-**Property 7: Chart generation completeness**
-*For any* contract dataset, chart generation should create visualizations for organization, sector, and contract type distributions
-**Validates: Requirements 2.3**
-
-**Property 8: Timeline chart completeness**
-*For any* contract dataset, timeline visualizations should include start dates, end dates, and completion status
-**Validates: Requirements 2.4**
-
-**Property 9: Visualization reactivity**
-*For any* data update, all visualizations should automatically refresh to reflect the new data
-**Validates: Requirements 2.5**
-
-### Filtering Properties
-
-**Property 10: Multi-field search coverage**
-*For any* search term, results should include matches from contract titles, solicitation numbers, award numbers, and project identifiers
 **Validates: Requirements 3.1**
 
-**Property 11: Filter combination logic**
-*For any* set of applied filters, results should satisfy all filter conditions using logical AND operations
+### Property 2: Organization chart aggregation correctness
+
+*For any* array of contract objects with various Client_Bureau values and numeric CEILING values, the organization chart data produced by `createOrganizationChart` should correctly sum the CEILING values grouped by Client_Bureau, and each organization's total should equal the sum of CEILING for all contracts with that Client_Bureau.
+
+**Validates: Requirements 3.2**
+
+### Property 3: Timeline chart aggregation correctness
+
+*For any* array of contract objects with valid PROJECT_START dates, the timeline chart data produced by `createTimelineChart` should contain one entry per unique year extracted from PROJECT_START, and the count for each year should equal the number of contracts starting in that year.
+
 **Validates: Requirements 3.3**
 
-**Property 12: Date range filtering accuracy**
-*For any* date range filter, results should only include contracts with dates falling within the specified range
+### Property 4: Trends chart aggregation correctness
+
+*For any* array of contract objects with valid PROJECT_START dates and numeric CEILING values, the trends chart data produced by `createTrendsChart` should contain one entry per unique year, and the total CEILING for each year should equal the sum of CEILING values for contracts starting in that year.
+
 **Validates: Requirements 3.4**
 
-**Property 13: Filter-visualization synchronization**
-*For any* applied filter set, all visualizations should update to reflect only the filtered dataset
-**Validates: Requirements 3.5**
+### Property 5: Table column non-duplication
 
-### Financial Analysis Properties
+*For any* contract row rendered in the data table, the text content of the Award Value cell should not equal the text content of the Ceiling cell (i.e., the Award Value column should display "N/A" or a distinct value, never a duplicate of the CEILING value).
 
-**Property 14: Financial calculation accuracy**
-*For any* set of contracts, calculated totals for contract values, ceiling amounts, and remaining budgets should be mathematically correct
-**Validates: Requirements 4.1**
+**Validates: Requirements 4.1, 4.2**
 
-**Property 15: Multi-year contract handling**
-*For any* multi-year contract with budget allocations, financial calculations should accurately account for time-based distributions
-**Validates: Requirements 4.2**
+### Property 6: Multi-select filter correctness
 
-**Property 16: Spending aggregation accuracy**
-*For any* grouping by organization, sector, or time period, spending totals should equal the sum of individual contract values
-**Validates: Requirements 4.3**
+*For any* array of contracts and any non-empty selection of status values, applying the status filter should produce a result where every contract's AWARD_STATUS is in the selected set, and no contracts with matching statuses are excluded. The same property holds for organization and contract type filters.
 
-**Property 17: Ceiling threshold detection**
-*For any* contract approaching its ceiling value, the system should flag it as a potential overrun risk
-**Validates: Requirements 4.4**
-
-### Personnel Management Properties
-
-**Property 18: Personnel role completeness**
-*For any* contract dataset, personnel displays should include all roles: Project Managers, Contracting Officers, Contract Specialists, and Program Managers
 **Validates: Requirements 5.1**
 
-**Property 19: Personnel information completeness**
-*For any* personnel record, displays should include names, email addresses, and current contract assignments
+### Property 7: Date range filter correctness
+
+*For any* array of contracts with valid date fields and any date range [start, end], applying the date range filter should produce a result where every contract's selected date field falls within [start, end] inclusive.
+
 **Validates: Requirements 5.2**
 
-**Property 20: Workload calculation accuracy**
-*For any* person, workload analysis should correctly count assigned contracts and sum total contract values managed
-**Validates: Requirements 5.3**
+### Property 8: Financial range filter correctness
 
-**Property 21: Personnel filtering accuracy**
-*For any* personnel-based filter, results should only include contracts assigned to the specified person
+*For any* array of contracts with numeric CEILING values and any range [min, max], applying the financial range filter should produce a result where every contract's CEILING value is >= min and <= max.
+
 **Validates: Requirements 5.4**
 
-### Timeline Management Properties
+### Property 9: Clear all filter round-trip
 
-**Property 22: Timeline data completeness**
-*For any* contract, timeline displays should include award dates, project start dates, planned completion dates, and actual completion dates
-**Validates: Requirements 6.1**
+*For any* array of contracts and any combination of applied filters, clearing all filters should produce a result set identical to the original unfiltered array.
 
-**Property 23: Days remaining calculation accuracy**
-*For any* active contract, calculated days remaining should be mathematically correct based on current date and completion date
-**Validates: Requirements 6.2**
+**Validates: Requirements 5.7**
 
-**Property 24: Completion deadline highlighting**
-*For any* contract approaching its completion date, the system should highlight it for attention
+### Property 10: Summary cards reflect filtered totals
+
+*For any* filtered dataset, the total contract value displayed should equal the sum of all CEILING values in the filtered set, the active count should equal the number of contracts with AWARD_STATUS "Active", and the completed count should equal the number with status "Completed" or "Closed".
+
 **Validates: Requirements 6.3**
 
-**Property 25: Timeline visualization completeness**
-*For any* contract dataset, timeline charts should display all contract phases and milestones
-**Validates: Requirements 6.4**
+### Property 11: Table sorting correctness
 
-**Property 26: Deadline alert generation**
-*For any* overdue contract or upcoming deadline, the system should generate appropriate alerts
-**Validates: Requirements 6.5**
+*For any* array of contracts and any sortable column, sorting ascending should produce a sequence where each element is <= the next (by the column's comparator), and sorting descending should produce a sequence where each element is >= the next. Toggling sort on the same column should reverse the direction.
 
-### Export and Reporting Properties
-
-**Property 27: CSV export completeness**
-*For any* filtered dataset, CSV export should include all visible columns and matching rows
-**Validates: Requirements 7.1**
-
-**Property 28: PDF report completeness**
-*For any* generated report, PDF should contain visualizations and summary statistics
-**Validates: Requirements 7.2**
-
-**Property 29: Export format preservation**
-*For any* exported data, financial values and dates should maintain their original formatting
-**Validates: Requirements 7.3**
-
-**Property 30: Export metadata inclusion**
-*For any* export operation, output should include metadata about filter criteria and export timestamp
-**Validates: Requirements 7.4**
-
-### Access Control Properties
-
-**Property 31: Authentication integration**
-*For any* user access attempt, authentication should be properly handled through Google Workspace integration
-**Validates: Requirements 9.1**
-
-**Property 32: Role-based permission enforcement**
-*For any* user with specific role permissions, access to contract data should be appropriately restricted
-**Validates: Requirements 9.2**
-
-**Property 33: Unauthorized access handling**
-*For any* unauthorized access attempt, the system should deny access and log the attempt
-**Validates: Requirements 9.3**
-
-**Property 34: Activity audit logging**
-*For any* user activity or data access, appropriate audit log entries should be created
-**Validates: Requirements 9.4**
-
-### Integration Properties
-
-**Property 35: Google Sheets API integration**
-*For any* data access operation, integration with Google Sheets API should function correctly
-**Validates: Requirements 10.2**
-
-**Property 36: Quota limit handling**
-*For any* Google Apps Script execution approaching time or quota limits, the system should handle constraints gracefully
-**Validates: Requirements 10.5**
+**Validates: Requirements 10.1, 10.2**
 
 ## Error Handling
 
-The system implements comprehensive error handling across all layers:
+### Chart Rendering Errors
+- If Chart.js fails to render (e.g., canvas not found), catch the error and display a "Chart unavailable" message in the container instead of leaving a blank canvas.
+- If the dataset for a chart is empty, display "No data available" centered in the chart container.
+- Before creating a new chart, destroy any existing chart instance on the same canvas to prevent Chart.js memory leaks.
 
-**Data Processing Errors**
-- Invalid data format detection with detailed error messages
-- Graceful degradation when optional fields are missing
-- Data validation errors logged with specific field and row information
-- Automatic retry mechanisms for transient Google Sheets API errors
+### Filter Errors
+- If date inputs contain invalid dates, ignore the date filter and do not crash. Log a warning to console.
+- If financial range inputs contain non-numeric values, ignore the financial filter.
+- If a filter produces zero results, display the empty state in the table ("No contracts found") and update charts to show empty state.
 
-**User Interface Errors**
-- Loading state management with timeout handling
-- User-friendly error messages for failed operations
-- Fallback displays when visualizations cannot be rendered
-- Progressive enhancement for unsupported browser features
+### Data Loading Errors
+- The existing error handling in `initializeDashboard`, `loadPage`, and `finishLoading` is preserved.
+- If a page load fails mid-stream, continue with data loaded so far (existing behavior).
 
-**Google Apps Script Constraints**
-- Execution time limit monitoring with batch processing
-- Quota usage tracking with automatic throttling
-- Memory usage optimization for large datasets
-- Graceful handling of service unavailability
-
-**Security and Access Errors**
-- Authentication failure handling with clear user guidance
-- Permission denied errors with appropriate messaging
-- Session timeout management with automatic re-authentication
-- Audit trail for all security-related events
+### Table Sorting Errors
+- If a column value is null/undefined during sort, treat it as empty string for string columns, 0 for numeric columns, and epoch start for date columns.
+- Sort should be stable for equal values.
 
 ## Testing Strategy
 
-The testing approach combines unit testing for specific functionality with property-based testing for comprehensive validation:
+### Testing Framework
 
-**Unit Testing Focus**
-- Specific data transformation examples (currency parsing, date formatting)
-- Edge cases for financial calculations (zero values, negative numbers)
-- Error conditions and boundary cases
-- Integration points between components
-- Google Apps Script specific functionality
+Since this is a Google Apps Script project with no npm/build tools, testing is done via standalone HTML test files that can be opened in a browser. The test files import the same functions and use a lightweight property-based testing approach.
 
-**Property-Based Testing Configuration**
-- Using JSVerify library for JavaScript property-based testing
-- Minimum 100 iterations per property test to ensure comprehensive coverage
-- Each property test tagged with: **Feature: contract-management-dashboard, Property {number}: {property_text}**
-- Custom generators for contract data, personnel information, and financial values
-- Shrinking enabled to find minimal failing examples
+For property-based testing, we use **fast-check** loaded via CDN (`https://cdn.jsdelivr.net/npm/fast-check/lib/bundle.js`). fast-check provides generators for arbitrary data and runs each property test for a minimum of 100 iterations.
 
-**Test Data Generation**
-- Contract data generators with realistic field distributions
-- Financial value generators with appropriate ranges and precision
-- Date generators covering various formats and edge cases
-- Personnel data generators with valid email formats and organizational structures
-- Filter criteria generators for comprehensive filtering tests
+### Unit Tests
 
-**Integration Testing**
-- Google Sheets API integration with mock data
-- HTML Service rendering with various data sizes
-- Cross-browser compatibility for dashboard functionality
-- Performance testing with large contract datasets
+Unit tests cover specific examples and edge cases:
+- Debug log function writes to console only, does not modify DOM (Requirements 2.1, 2.2, 2.3)
+- Date preset buttons compute correct date ranges (Requirements 5.3)
+- Financial preset buttons set correct min/max values (Requirements 5.5)
+- Empty dataset shows "No data available" in charts (Requirements 3.7)
+- Award Value column shows "N/A" when no distinct field exists (Requirements 4.3)
+- Sort direction indicator updates correctly on column header (Requirements 10.3)
+- Loading overlay visibility toggles correctly (Requirements 7.1)
+- Export modal opens with filter summary (Requirements 9.3)
 
-**Testing Infrastructure**
-- Automated test execution in Google Apps Script environment
-- Test data isolation using separate Google Sheets
-- Continuous integration with clasp deployment pipeline
-- Test coverage reporting for both unit and property tests
+### Property-Based Tests
 
-The dual testing approach ensures both specific functionality correctness and general system reliability across all possible inputs and scenarios.
+Each correctness property is implemented as a single property-based test using fast-check:
+
+- **Feature: contract-management-dashboard, Property 1: Status chart aggregation** — Generate random arrays of contracts with random AWARD_STATUS values, verify aggregation counts match.
+- **Feature: contract-management-dashboard, Property 2: Organization chart aggregation** — Generate random contracts with random Client_Bureau and CEILING, verify sums match.
+- **Feature: contract-management-dashboard, Property 3: Timeline chart aggregation** — Generate random contracts with random PROJECT_START years, verify counts match.
+- **Feature: contract-management-dashboard, Property 4: Trends chart aggregation** — Generate random contracts with random years and CEILING, verify sums match.
+- **Feature: contract-management-dashboard, Property 5: Table column non-duplication** — Generate random contract rows, verify Award Value cell text ≠ Ceiling cell text.
+- **Feature: contract-management-dashboard, Property 6: Multi-select filter correctness** — Generate random contracts and random filter selections, verify filtered results match.
+- **Feature: contract-management-dashboard, Property 7: Date range filter correctness** — Generate random contracts with dates and random date ranges, verify all results fall within range.
+- **Feature: contract-management-dashboard, Property 8: Financial range filter correctness** — Generate random contracts with CEILING values and random [min, max], verify all results within range.
+- **Feature: contract-management-dashboard, Property 9: Clear all filter round-trip** — Generate random contracts, apply random filters, clear all, verify result equals original.
+- **Feature: contract-management-dashboard, Property 10: Summary cards reflect filtered totals** — Generate random filtered datasets, verify computed totals match.
+- **Feature: contract-management-dashboard, Property 11: Table sorting correctness** — Generate random contract arrays and random column, verify sorted order.
+
+Each test runs a minimum of 100 iterations. Each test is tagged with a comment: `// Feature: contract-management-dashboard, Property N: <title>`.
