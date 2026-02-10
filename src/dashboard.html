@@ -82,39 +82,38 @@
                 
                 <!-- Status Filter -->
                 <div class="filter-group">
-                    <label for="statusFilter">Status</label>
-                    <div class="multi-select-container">
-                        <select id="statusFilter" class="form-select multi-select" multiple>
-                            <option value="Active">Active</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Cancelled">Cancelled</option>
-                            <option value="On Hold">On Hold</option>
-                        </select>
-                        <div class="selected-count" id="statusCount">0 selected</div>
+                    <label>Status</label>
+                    <div class="dropdown-select" id="statusDropdown">
+                        <button type="button" class="dropdown-toggle form-input" id="statusToggle">All Statuses</button>
+                        <div class="dropdown-menu" id="statusMenu">
+                            <!-- Populated dynamically -->
+                        </div>
                     </div>
+                    <select id="statusFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
                 
                 <!-- Organization Filter -->
                 <div class="filter-group">
-                    <label for="organizationFilter">Organization</label>
-                    <div class="multi-select-container">
-                        <select id="organizationFilter" class="form-select multi-select" multiple>
-                            <!-- Options will be populated dynamically -->
-                        </select>
-                        <div class="selected-count" id="organizationCount">0 selected</div>
+                    <label>Organization</label>
+                    <div class="dropdown-select" id="orgDropdown">
+                        <button type="button" class="dropdown-toggle form-input" id="orgToggle">All Organizations</button>
+                        <div class="dropdown-menu" id="orgMenu">
+                            <!-- Populated dynamically -->
+                        </div>
                     </div>
+                    <select id="organizationFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
                 
                 <!-- Contract Type Filter -->
                 <div class="filter-group">
-                    <label for="contractTypeFilter">Contract Type</label>
-                    <div class="multi-select-container">
-                        <select id="contractTypeFilter" class="form-select multi-select" multiple>
-                            <!-- Options will be populated dynamically -->
-                        </select>
-                        <div class="selected-count" id="contractTypeCount">0 selected</div>
+                    <label>Contract Type</label>
+                    <div class="dropdown-select" id="typeDropdown">
+                        <button type="button" class="dropdown-toggle form-input" id="typeToggle">All Types</button>
+                        <div class="dropdown-menu" id="typeMenu">
+                            <!-- Populated dynamically -->
+                        </div>
                     </div>
+                    <select id="contractTypeFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
                 
                 <!-- Date Range Filter -->
@@ -229,27 +228,6 @@
                 <div class="chart-container">
                     <h3>Financial Trends</h3>
                     <canvas id="trendsChart"></canvas>
-                </div>
-            </div>
-            
-            <!-- Gantt Chart Section -->
-            <div class="gantt-section">
-                <div class="gantt-header">
-                    <h3>Contract Timeline (Gantt View)</h3>
-                    <div class="gantt-controls">
-                        <button id="ganttZoomIn" class="btn btn-secondary">Zoom In</button>
-                        <button id="ganttZoomOut" class="btn btn-secondary">Zoom Out</button>
-                        <button id="ganttToday" class="btn btn-secondary">Today</button>
-                        <select id="ganttTimeRange" class="form-select">
-                            <option value="6months">6 Months</option>
-                            <option value="1year" selected>1 Year</option>
-                            <option value="2years">2 Years</option>
-                            <option value="all">All Time</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="gantt-container">
-                    <canvas id="ganttChart"></canvas>
                 </div>
             </div>
         </section>

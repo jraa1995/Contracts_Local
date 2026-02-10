@@ -245,6 +245,93 @@ function populateFilters() {
   fillSelect('statusFilter', Object.keys(statuses).sort());
   fillSelect('organizationFilter', Object.keys(orgs).sort());
   fillSelect('contractTypeFilter', Object.keys(types).sort());
+  
+  // Build checkbox dropdown menus
+  buildDropdownMenu('statusMenu', Object.keys(statuses).sort(), 'statusFilter', 'statusToggle', 'All Statuses');
+  buildDropdownMenu('orgMenu', Object.keys(orgs).sort(), 'organizationFilter', 'orgToggle', 'All Organizations');
+  buildDropdownMenu('typeMenu', Object.keys(types).sort(), 'contractTypeFilter', 'typeToggle', 'All Types');
+  
+  // Setup dropdown toggles
+  setupDropdownToggle('statusToggle', 'statusMenu');
+  setupDropdownToggle('orgToggle', 'orgMenu');
+  setupDropdownToggle('typeToggle', 'typeMenu');
+  
+  // Close dropdowns on outside click
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.dropdown-select')) {
+      document.querySelectorAll('.dropdown-menu').forEach(function(m) { m.classList.remove('open'); });
+    }
+  });
+}
+
+function buildDropdownMenu(menuId, options, selectId, toggleId, defaultLabel) {
+  var menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.innerHTML = '';
+  for (var i = 0; i < options.length; i++) {
+    var item = document.createElement('div');
+    item.className = 'dropdown-item';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = options[i];
+    cb.id = menuId + '_' + i;
+    var lbl = document.createElement('label');
+    lbl.htmlFor = cb.id;
+    lbl.textContent = options[i];
+    item.appendChild(cb);
+    item.appendChild(lbl);
+    (function(checkbox) {
+      checkbox.addEventListener('change', function() {
+        syncDropdownToSelect(menuId, selectId);
+        updateDropdownLabel(menuId, toggleId, defaultLabel);
+        applyFilters();
+      });
+    })(cb);
+    menu.appendChild(item);
+  }
+}
+
+function setupDropdownToggle(toggleId, menuId) {
+  var toggle = document.getElementById(toggleId);
+  if (!toggle) return;
+  toggle.addEventListener('click', function(e) {
+    e.stopPropagation();
+    // Close other dropdowns
+    document.querySelectorAll('.dropdown-menu').forEach(function(m) {
+      if (m.id !== menuId) m.classList.remove('open');
+    });
+    var menu = document.getElementById(menuId);
+    if (menu) menu.classList.toggle('open');
+  });
+}
+
+function syncDropdownToSelect(menuId, selectId) {
+  var menu = document.getElementById(menuId);
+  var sel = document.getElementById(selectId);
+  if (!menu || !sel) return;
+  // Clear all selections
+  for (var i = 0; i < sel.options.length; i++) sel.options[i].selected = false;
+  // Set selections from checkboxes
+  var checkboxes = menu.querySelectorAll('input[type="checkbox"]:checked');
+  checkboxes.forEach(function(cb) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === cb.value) { sel.options[i].selected = true; break; }
+    }
+  });
+}
+
+function updateDropdownLabel(menuId, toggleId, defaultLabel) {
+  var menu = document.getElementById(menuId);
+  var toggle = document.getElementById(toggleId);
+  if (!menu || !toggle) return;
+  var checked = menu.querySelectorAll('input[type="checkbox"]:checked');
+  if (checked.length === 0) {
+    toggle.textContent = defaultLabel;
+  } else if (checked.length === 1) {
+    toggle.textContent = checked[0].value;
+  } else {
+    toggle.textContent = checked.length + ' selected';
+  }
 }
 
 function fillSelect(id, options) {
@@ -383,6 +470,19 @@ function setupEventListeners() {
         var sel = document.getElementById(id);
         if (sel) sel.selectedIndex = -1;
       });
+      // Uncheck all dropdown checkboxes and reset labels
+      document.querySelectorAll('.dropdown-menu input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+      var toggleMap = { statusToggle: 'All Statuses', orgToggle: 'All Organizations', typeToggle: 'All Types' };
+      for (var tid in toggleMap) {
+        var t = document.getElementById(tid);
+        if (t) t.textContent = toggleMap[tid];
+      }
+      // Clear date and financial inputs
+      var dateStart = document.getElementById('dateRangeStart'); if (dateStart) dateStart.value = '';
+      var dateEnd = document.getElementById('dateRangeEnd'); if (dateEnd) dateEnd.value = '';
+      var finMin = document.getElementById('financialMin'); if (finMin) finMin.value = '';
+      var finMax = document.getElementById('financialMax'); if (finMax) finMax.value = '';
+      document.querySelectorAll('.date-preset-btn, .financial-preset-btn').forEach(function(b) { b.classList.remove('active'); });
       applyFilters();
     });
   }
