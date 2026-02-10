@@ -144,14 +144,15 @@ function updateSummaryCards() {
 
 /**
  * Calculate summary statistics
+ * Column names from AL_Extract: AWARD_STATUS, CEILING, AWARD, PROJECT, etc.
  */
 function calculateSummary(data) {
-    const activeContracts = data.filter(c => c.status === 'Active');
-    const completedContracts = data.filter(c => c.status === 'Completed');
-    const totalValue = data.reduce((sum, c) => sum + (c.awardValue || 0), 0);
-    const totalCeiling = data.reduce((sum, c) => sum + (c.ceiling || 0), 0);
-    const activeValue = activeContracts.reduce((sum, c) => sum + (c.awardValue || 0), 0);
-    const completedValue = completedContracts.reduce((sum, c) => sum + (c.awardValue || 0), 0);
+    const activeContracts = data.filter(c => c.AWARD_STATUS === 'Active' || c.AWARD_STATUS === 'active');
+    const completedContracts = data.filter(c => c.AWARD_STATUS === 'Completed' || c.AWARD_STATUS === 'completed' || c.AWARD_STATUS === 'Closed');
+    const totalValue = data.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
+    const totalCeiling = data.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
+    const activeValue = activeContracts.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
+    const completedValue = completedContracts.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
     const averageValue = data.length > 0 ? totalValue / data.length : 0;
     const remainingBudget = totalCeiling - totalValue;
     
@@ -187,16 +188,20 @@ function updateDataTable() {
 }
 
 /**
- * Update filter dropdown options
+ * Update filter dropdown options using actual AL_Extract column names
  */
 function updateFilterOptions() {
     // Update organization filter options
-    const organizations = [...new Set(contractData.map(c => c.clientBureau).filter(Boolean))];
+    const organizations = [...new Set(contractData.map(c => c.Client_Bureau || c.client_organization).filter(Boolean))];
     updateSelectOptions('organizationFilter', organizations);
     
     // Update contract type filter options
-    const contractTypes = [...new Set(contractData.map(c => c.contractType).filter(Boolean))];
+    const contractTypes = [...new Set(contractData.map(c => c.CONTRACT_TYPE).filter(Boolean))];
     updateSelectOptions('contractTypeFilter', contractTypes);
+    
+    // Update status filter options from actual data
+    const statuses = [...new Set(contractData.map(c => c.AWARD_STATUS).filter(Boolean))];
+    updateSelectOptions('statusFilter', statuses);
     
     // Update selected counts
     updateSelectedCount('statusCount', 0);
@@ -1484,10 +1489,13 @@ class FilterController {
         
         const term = searchTerm.toLowerCase();
         return this.originalData.filter(contract => {
-            return (contract.award && contract.award.toLowerCase().includes(term)) ||
-                   (contract.project && contract.project.toLowerCase().includes(term)) ||
-                   (contract.solicitation && contract.solicitation.toLowerCase().includes(term)) ||
-                   (contract.clientBureau && contract.clientBureau.toLowerCase().includes(term));
+            return (contract.AWARD && String(contract.AWARD).toLowerCase().includes(term)) ||
+                   (contract.PROJECT && String(contract.PROJECT).toLowerCase().includes(term)) ||
+                   (contract.PROJECT_TITLE && String(contract.PROJECT_TITLE).toLowerCase().includes(term)) ||
+                   (contract.SOLICITATION && String(contract.SOLICITATION).toLowerCase().includes(term)) ||
+                   (contract.Client_Bureau && String(contract.Client_Bureau).toLowerCase().includes(term)) ||
+                   (contract.client_organization && String(contract.client_organization).toLowerCase().includes(term)) ||
+                   (contract.AWARD_STATUS && String(contract.AWARD_STATUS).toLowerCase().includes(term));
         });
     }
     
@@ -1556,14 +1564,14 @@ class DataTableManager {
         displayData.forEach((contract, index) => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${contract.award || '—'}</td>
-                <td>${contract.project || '—'}</td>
-                <td>${this.formatCurrency(contract.awardValue)}</td>
-                <td>${this.formatCurrency(contract.ceiling)}</td>
-                <td><span class="status-badge ${this.getStatusClass(contract.status)}">${contract.status || '—'}</span></td>
-                <td>${this.formatDate(contract.projectStart)}</td>
-                <td>${this.formatDate(contract.projectEnd)}</td>
-                <td>${contract.clientBureau || '—'}</td>
+                <td>${contract.AWARD || '—'}</td>
+                <td>${contract.PROJECT || contract.PROJECT_TITLE || '—'}</td>
+                <td>${this.formatCurrency(parseFloat(contract.CEILING) || 0)}</td>
+                <td>${this.formatCurrency(parseFloat(contract.CEILING) || 0)}</td>
+                <td><span class="status-badge ${this.getStatusClass(contract.AWARD_STATUS)}">${contract.AWARD_STATUS || '—'}</span></td>
+                <td>${this.formatDate(contract.PROJECT_START)}</td>
+                <td>${this.formatDate(contract.PROJECT_END)}</td>
+                <td>${contract.Client_Bureau || contract.client_organization || '—'}</td>
             `;
             tbody.appendChild(row);
         });

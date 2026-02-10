@@ -417,67 +417,77 @@ function testALExtractSheet() {
 }
 
 /**
- * Load contract data with caching for performance
+ * Load contract data with chunked caching for large datasets
  * @returns {ContractData[]} Array of contract data
  */
 function getContractData() {
   try {
     console.log('getContractData called');
     
-    // Try cache first (5 minute cache)
+    // Try cache first
     const cache = CacheService.getScriptCache();
-    const cacheKey = 'contractData_AL_Extract';
-    const cached = cache.get(cacheKey);
+    const chunkCountStr = cache.get('contractData_chunks');
     
-    if (cached) {
-      console.log('Returning cached data');
-      const data = JSON.parse(cached);
-      console.log(`Cached data: ${data.length} contracts`);
-      return data;
+    if (chunkCountStr) {
+      const chunkCount = parseInt(chunkCountStr);
+      console.log('Loading from cache, chunks: ' + chunkCount);
+      const keys = [];
+      for (let i = 0; i < chunkCount; i++) {
+        keys.push('contractData_' + i);
+      }
+      const chunks = cache.getAll(keys);
+      let allData = [];
+      for (let i = 0; i < chunkCount; i++) {
+        const chunk = chunks['contractData_' + i];
+        if (chunk) {
+          allData = allData.concat(JSON.parse(chunk));
+        }
+      }
+      if (allData.length > 0) {
+        console.log('Returned ' + allData.length + ' cached contracts');
+        return allData;
+      }
     }
     
     console.log('Loading fresh data from AL_Extract sheet');
     
-    // Get the active spreadsheet
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    console.log('Got spreadsheet:', spreadsheet.getName());
-    
     const sheet = spreadsheet.getSheetByName('AL_Extract');
     
     if (!sheet) {
       const availableSheets = spreadsheet.getSheets().map(s => s.getName()).join(', ');
-      throw new Error(`AL_Extract sheet not found. Available sheets: ${availableSheets}`);
+      throw new Error('AL_Extract sheet not found. Available: ' + availableSheets);
     }
     
-    console.log('Found AL_Extract sheet');
-    
-    // Get all data
     const range = sheet.getDataRange();
     const values = range.getValues();
     
-    console.log(`Read ${values.length} rows from sheet`);
+    console.log('Read ' + values.length + ' rows');
     
-    if (values.length <= 1) {
-      console.log('No data rows found (only headers or empty)');
+    if (values.length <= 2) {
       return [];
     }
     
-    // First row is headers
-    const headers = values[0];
-    console.log('Headers:', headers.join(', '));
+    // Row 1 = column numbers (skip), Row 2 = actual headers, Row 3+ = data
+    const headers = values[1];
+    console.log('Headers (row 2): ' + headers.slice(0, 10).join(', ') + '...');
     
     const data = [];
     
-    // Convert rows to objects
-    for (let i = 1; i < values.length; i++) {
+    for (let i = 2; i < values.length; i++) {
       const row = values[i];
+      
+      // Skip empty rows
+      if (!row[0] && !row[1] && !row[2]) continue;
+      
       const contract = {};
       
       for (let j = 0; j < headers.length; j++) {
-        const header = headers[j];
+        const header = String(headers[j]).trim();
+        if (!header) continue;
+        
         const value = row[j];
         
-        // Convert dates if needed
         if (value instanceof Date) {
           contract[header] = value.toISOString();
         } else {
@@ -488,27 +498,33 @@ function getContractData() {
       data.push(contract);
     }
     
-    console.log(`Converted ${data.length} contracts`);
+    console.log('Converted ' + data.length + ' contracts');
     
-    // Cache for 5 minutes
+    // Cache in chunks (CacheService limit is 100KB per key)
     try {
-      cache.put(cacheKey, JSON.stringify(data), 300);
-      console.log('Data cached successfully');
+      const chunkSize = 200;
+      const totalChunks = Math.ceil(data.length / chunkSize);
+      const cacheEntries = {};
+      
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = data.slice(i * chunkSize, (i + 1) * chunkSize);
+        cacheEntries['contractData_' + i] = JSON.stringify(chunk);
+      }
+      
+      cache.putAll(cacheEntries, 300);
+      cache.put('contractData_chunks', String(totalChunks), 300);
+      console.log('Cached in ' + totalChunks + ' chunks');
     } catch (cacheError) {
-      console.warn('Failed to cache data:', cacheError.message);
+      console.warn('Cache failed, continuing without cache:', cacheError.message);
     }
     
     return data;
     
   } catch (error) {
     console.error('Error in getContractData:', error);
-    console.error('Error stack:', error.stack);
-    
-    // Return empty array instead of throwing to prevent UI from breaking
     return [];
   }
 }
-
 /**
  * Enhanced API endpoint to get financial summary with error handling
  * @param {ContractData[]} contracts - Contract data
