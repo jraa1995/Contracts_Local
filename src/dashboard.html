@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contract Management Dashboard</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    
+    <!-- Styles -->
+    <?!= include('styles') ?>
+</head>
+<body>
+    <!-- Header -->
+    <header class="dashboard-header">
+        <div class="header-content">
+            <div class="header-left">
+                <h1 class="dashboard-title">Contract Management Dashboard</h1>
+                <nav class="dashboard-nav">
+                    <button class="nav-btn active" data-section="overview">Overview</button>
+                    <button class="nav-btn" data-section="analytics">Analytics</button>
+                    <button class="nav-btn" data-section="reports">Reports</button>
+                </nav>
+            </div>
+            <div class="header-actions">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-indicator connected"></span>
+                    <span class="status-text">Connected</span>
+                </div>
+                <button id="refreshBtn" class="btn btn-secondary">
+                    <span class="icon">🔄</span>
+                    Refresh
+                </button>
+                <button id="exportBtn" class="btn btn-primary">
+                    <span class="icon">📊</span>
+                    Export
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <div class="loading-content">
+                <p class="loading-text">Loading contract data...</p>
+                <div class="loading-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="loadingProgress"></div>
+                    </div>
+                    <span class="progress-text" id="loadingProgressText">0%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="dashboard-main">
+        <!-- Filters Section -->
+        <section class="filters-section">
+            <div class="filters-header">
+                <h2>Filters</h2>
+                <div class="filter-actions">
+                    <button id="clearFiltersBtn" class="btn btn-link">Clear All</button>
+                    <button id="saveFiltersBtn" class="btn btn-link">Save Filters</button>
+                </div>
+            </div>
+            <div class="filters-grid">
+                <!-- Search Filter -->
+                <div class="filter-group">
+                    <label for="searchInput">Search</label>
+                    <div class="search-input-container">
+                        <input type="text" id="searchInput" placeholder="Search contracts, awards, projects..." class="form-input search-input">
+                        <span class="search-icon">🔍</span>
+                        <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">&times;</button>
+                    </div>
+                    <div class="search-suggestions" id="searchSuggestions" style="display: none;"></div>
+                </div>
+                
+                <!-- Status Filter -->
+                <div class="filter-group">
+                    <label for="statusFilter">Status</label>
+                    <div class="multi-select-container">
+                        <select id="statusFilter" class="form-select multi-select" multiple>
+                            <option value="Active">Active</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Cancelled">Cancelled</option>
+                            <option value="On Hold">On Hold</option>
+                        </select>
+                        <div class="selected-count" id="statusCount">0 selected</div>
+                    </div>
+                </div>
+                
+                <!-- Organization Filter -->
+                <div class="filter-group">
+                    <label for="organizationFilter">Organization</label>
+                    <div class="multi-select-container">
+                        <select id="organizationFilter" class="form-select multi-select" multiple>
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                        <div class="selected-count" id="organizationCount">0 selected</div>
+                    </div>
+                </div>
+                
+                <!-- Contract Type Filter -->
+                <div class="filter-group">
+                    <label for="contractTypeFilter">Contract Type</label>
+                    <div class="multi-select-container">
+                        <select id="contractTypeFilter" class="form-select multi-select" multiple>
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                        <div class="selected-count" id="contractTypeCount">0 selected</div>
+                    </div>
+                </div>
+                
+                <!-- Date Range Filter -->
+                <div class="filter-group">
+                    <label>Date Range</label>
+                    <div class="date-filter-container">
+                        <select id="dateFieldSelect" class="form-select date-field-select">
+                            <option value="awardDate">Award Date</option>
+                            <option value="projectStart">Project Start</option>
+                            <option value="projectEnd">Project End</option>
+                        </select>
+                        <div class="date-range-inputs">
+                            <input type="date" id="dateRangeStart" class="form-input date-input">
+                            <span class="date-separator">to</span>
+                            <input type="date" id="dateRangeEnd" class="form-input date-input">
+                        </div>
+                        <div class="date-presets">
+                            <button class="date-preset-btn" data-preset="last30">Last 30 days</button>
+                            <button class="date-preset-btn" data-preset="last90">Last 90 days</button>
+                            <button class="date-preset-btn" data-preset="thisYear">This Year</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Financial Range Filter -->
+                <div class="filter-group">
+                    <label>Financial Range</label>
+                    <div class="financial-filter-container">
+                        <select id="financialFieldSelect" class="form-select financial-field-select">
+                            <option value="awardValue">Award Value</option>
+                            <option value="ceiling">Ceiling Value</option>
+                        </select>
+                        <div class="range-inputs">
+                            <input type="number" id="financialMin" placeholder="Min" class="form-input range-input">
+                            <span class="range-separator">to</span>
+                            <input type="number" id="financialMax" placeholder="Max" class="form-input range-input">
+                        </div>
+                        <div class="financial-presets">
+                            <button class="financial-preset-btn" data-preset="under100k">Under $100K</button>
+                            <button class="financial-preset-btn" data-preset="100k-1m">$100K - $1M</button>
+                            <button class="financial-preset-btn" data-preset="over1m">Over $1M</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Active Filters Display -->
+            <div class="active-filters" id="activeFilters" style="display: none;">
+                <div class="active-filters-header">
+                    <span>Active Filters:</span>
+                    <button id="clearAllActiveFilters" class="btn btn-link btn-sm">Clear All</button>
+                </div>
+                <div class="active-filters-list" id="activeFiltersList"></div>
+            </div>
+        </section>
+
+        <!-- Summary Cards -->
+        <section class="summary-section">
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="card-icon">💰</div>
+                    <div class="card-content">
+                        <h3>Total Contract Value</h3>
+                        <p class="card-value currency" id="totalValue">$0</p>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-icon">📋</div>
+                    <div class="card-content">
+                        <h3>Active Contracts</h3>
+                        <p class="card-value count" id="activeCount">0</p>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-icon">✅</div>
+                    <div class="card-content">
+                        <h3>Completed Contracts</h3>
+                        <p class="card-value count" id="completedCount">0</p>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="card-icon">📈</div>
+                    <div class="card-content">
+                        <h3>Budget Utilization</h3>
+                        <p class="card-value percentage" id="budgetUtilization">0%</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+            <div class="charts-header">
+                <h2>Data Visualizations</h2>
+                <div class="charts-status">
+                    <span id="chartUpdateIndicator" class="chart-indicator">Ready</span>
+                </div>
+            </div>
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>Contract Value by Organization</h3>
+                    <canvas id="organizationChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Contract Status Distribution</h3>
+                    <canvas id="statusChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Timeline Overview</h3>
+                    <canvas id="timelineChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Financial Trends</h3>
+                    <canvas id="trendsChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Gantt Chart Section -->
+            <div class="gantt-section">
+                <div class="gantt-header">
+                    <h3>Contract Timeline (Gantt View)</h3>
+                    <div class="gantt-controls">
+                        <button id="ganttZoomIn" class="btn btn-secondary">Zoom In</button>
+                        <button id="ganttZoomOut" class="btn btn-secondary">Zoom Out</button>
+                        <button id="ganttToday" class="btn btn-secondary">Today</button>
+                        <select id="ganttTimeRange" class="form-select">
+                            <option value="6months">6 Months</option>
+                            <option value="1year" selected>1 Year</option>
+                            <option value="2years">2 Years</option>
+                            <option value="all">All Time</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="gantt-container">
+                    <canvas id="ganttChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Table Section -->
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Contract Details</h2>
+                <div class="table-actions">
+                    <button id="exportTableBtn" class="btn btn-secondary">Export Table</button>
+                    <select id="pageSizeSelect" class="form-select">
+                        <option value="25">25 per page</option>
+                        <option value="50" selected>50 per page</option>
+                        <option value="100">100 per page</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-container">
+                <table id="contractsTable" class="data-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="award">Award #</th>
+                            <th data-sort="project">Project</th>
+                            <th data-sort="awardValue">Award Value</th>
+                            <th data-sort="ceiling">Ceiling</th>
+                            <th data-sort="status">Status</th>
+                            <th data-sort="projectStart">Start Date</th>
+                            <th data-sort="projectEnd">End Date</th>
+                            <th data-sort="clientBureau">Organization</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Table rows will be populated dynamically -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span id="paginationInfo">Showing 0 of 0 contracts</span>
+                </div>
+                <div class="pagination-controls">
+                    <button id="prevPageBtn" class="btn btn-secondary" disabled>Previous</button>
+                    <span id="pageNumbers" class="page-numbers"></span>
+                    <button id="nextPageBtn" class="btn btn-secondary" disabled>Next</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Error Modal -->
+    <div id="errorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Error</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage">An error occurred.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeErrorModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Export Data</h3>
+                <button class="modal-close" onclick="closeExportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="export-section">
+                    <h4>Export Format</h4>
+                    <div class="export-options">
+                        <label>
+                            <input type="radio" name="exportFormat" value="csv" checked>
+                            <span class="format-icon">📄</span>
+                            <div class="format-details">
+                                <strong>CSV (Comma Separated Values)</strong>
+                                <small>Best for data analysis and spreadsheet applications</small>
+                            </div>
+                        </label>
+                        <label>
+                            <input type="radio" name="exportFormat" value="excel">
+                            <span class="format-icon">📊</span>
+                            <div class="format-details">
+                                <strong>Excel Workbook</strong>
+                                <small>Formatted spreadsheet with multiple sheets</small>
+                            </div>
+                        </label>
+                        <label>
+                            <input type="radio" name="exportFormat" value="pdf">
+                            <span class="format-icon">📋</span>
+                            <div class="format-details">
+                                <strong>PDF Report</strong>
+                                <small>Professional report with charts and summaries</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="export-section">
+                    <h4>Export Configuration</h4>
+                    <select id="exportConfiguration" class="form-select">
+                        <option value="detailed">Detailed Report - All fields and data</option>
+                        <option value="summary">Summary Report - Key metrics and overview</option>
+                        <option value="financial">Financial Analysis - Budget and spending focus</option>
+                        <option value="personnel">Personnel Report - Staff assignments and contacts</option>
+                    </select>
+                    <small class="help-text">Choose the type of report that best fits your needs</small>
+                </div>
+                
+                <div class="export-section">
+                    <h4>Current Filters</h4>
+                    <div id="exportFilterSummary" class="filter-summary">
+                        <em>Loading filter information...</em>
+                    </div>
+                    <small class="help-text">These filters will be applied to your export and included in the metadata</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeExportModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="performExport()">
+                    <span class="icon">⬇️</span>
+                    Export Data
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <?!= include('scripts') ?>
+</body>
+</html>
