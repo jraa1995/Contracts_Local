@@ -664,7 +664,6 @@ class DashboardController {
       this.visualizationManager.cleanup();
     }
   }
-}
 
   /**
    * Update all components with new data
