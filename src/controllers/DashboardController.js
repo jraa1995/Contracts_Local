@@ -55,10 +55,19 @@ class DashboardController {
   }
 
   /**
+   * Get current time in milliseconds (browser-safe)
+   */
+  now() {
+    return typeof performance !== 'undefined' && performance.now 
+      ? performance.now() 
+      : Date.now();
+  }
+
+  /**
    * Initialize the dashboard application with complete component integration
    */
   async initialize() {
-    const startTime = performance.now();
+    const startTime = this.now();
     
     try {
       this.showLoading('Initializing dashboard...');
@@ -85,7 +94,7 @@ class DashboardController {
       this.startHealthMonitoring();
       
       this.isInitialized = true;
-      this.performanceMetrics.initializationTime = performance.now() - startTime;
+      this.performanceMetrics.initializationTime = this.now() - startTime;
       
       this.hideLoading();
       this.showSuccessMessage('Dashboard initialized successfully');
@@ -133,7 +142,7 @@ class DashboardController {
    * Load and process contract data
    */
   async loadAndProcessData() {
-    const startTime = performance.now();
+    const startTime = this.now();
     
     try {
       this.updateLoadingProgress('Loading contract data...', 20);
@@ -156,7 +165,7 @@ class DashboardController {
         console.warn('Data validation issues found:', validationResult.errors);
       }
       
-      this.performanceMetrics.dataLoadTime = performance.now() - startTime;
+      this.performanceMetrics.dataLoadTime = this.now() - startTime;
       this.healthStatus.dataService = 'healthy';
       
     } catch (error) {
@@ -268,7 +277,7 @@ class DashboardController {
    * Perform initial render of all components
    */
   async performInitialRender() {
-    const startTime = performance.now();
+    const startTime = this.now();
     
     try {
       // Render initial visualizations
@@ -283,7 +292,7 @@ class DashboardController {
       // Update filter options
       this.updateFilterOptions(this.contractData);
       
-      this.performanceMetrics.visualizationTime = performance.now() - startTime;
+      this.performanceMetrics.visualizationTime = this.now() - startTime;
       
     } catch (error) {
       throw new Error(`Initial render failed: ${error.message}`);
@@ -300,7 +309,7 @@ class DashboardController {
     }
     
     this.isLoading = true;
-    const startTime = performance.now();
+    const startTime = this.now();
     
     try {
       this.showLoading('Loading contract data...');
@@ -313,7 +322,7 @@ class DashboardController {
         await this.updateAllComponentsWithNewData();
       }
       
-      this.performanceMetrics.dataLoadTime = performance.now() - startTime;
+      this.performanceMetrics.dataLoadTime = this.now() - startTime;
       this.performanceMetrics.lastRefresh = new Date();
       
       this.hideLoading();
@@ -408,13 +417,13 @@ class DashboardController {
    * Update visualizations with filtered data
    */
   updateVisualizationsWithFilteredData(filteredData) {
-    const startTime = performance.now();
+    const startTime = this.now();
     
     try {
       this.visualizationManager.updateCharts(filteredData);
       this.updateSummaryStatistics(filteredData);
       
-      this.performanceMetrics.filterTime = performance.now() - startTime;
+      this.performanceMetrics.filterTime = this.now() - startTime;
       
     } catch (error) {
       console.error('Failed to update visualizations:', error);
@@ -550,9 +559,12 @@ class DashboardController {
    * Start health monitoring
    */
   startHealthMonitoring() {
-    setInterval(() => {
-      this.checkSystemHealth();
-    }, 30000); // Check every 30 seconds
+    // Only run in browser environment
+    if (typeof setInterval !== 'undefined') {
+      this.healthMonitorInterval = setInterval(() => {
+        this.checkSystemHealth();
+      }, 30000); // Check every 30 seconds
+    }
   }
 
   /**
@@ -1063,6 +1075,9 @@ class DashboardController {
    * Attempt error recovery based on error type
    */
   attemptErrorRecovery(error, context) {
+    // Only attempt recovery in browser environment
+    if (typeof setTimeout === 'undefined') return;
+    
     if (context.includes('data') || context.includes('load')) {
       // Try to reload data
       setTimeout(() => {
