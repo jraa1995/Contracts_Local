@@ -117,6 +117,63 @@ class SecurityAuditor {
   }
 
   /**
+   * Convenience method to log simple events
+   * @param {string} eventName - Event name/action
+   * @param {Object} details - Event details
+   * @returns {string} Audit event ID
+   */
+  logEvent(eventName, details = {}) {
+    const userEmail = details.user || details.userEmail || 'system';
+    const category = this.determineCategory(eventName);
+    const riskLevel = this.determineRiskLevel(eventName, details);
+    
+    return this.logAuditEvent(category, eventName, userEmail, details, riskLevel);
+  }
+
+  /**
+   * Determine category from event name
+   * @param {string} eventName - Event name
+   * @returns {string} Audit category
+   */
+  determineCategory(eventName) {
+    const eventLower = eventName.toLowerCase();
+    
+    if (eventLower.includes('auth') || eventLower.includes('login')) {
+      return AuditCategory.AUTHENTICATION;
+    } else if (eventLower.includes('permission') || eventLower.includes('access')) {
+      return AuditCategory.AUTHORIZATION;
+    } else if (eventLower.includes('export') || eventLower.includes('data')) {
+      return AuditCategory.DATA_ACCESS;
+    } else if (eventLower.includes('admin') || eventLower.includes('maintenance')) {
+      return AuditCategory.SYSTEM_ADMINISTRATION;
+    } else if (eventLower.includes('violation') || eventLower.includes('suspicious')) {
+      return AuditCategory.SECURITY_VIOLATION;
+    } else {
+      return AuditCategory.USER_ACTIVITY;
+    }
+  }
+
+  /**
+   * Determine risk level from event name and details
+   * @param {string} eventName - Event name
+   * @param {Object} details - Event details
+   * @returns {string} Risk level
+   */
+  determineRiskLevel(eventName, details) {
+    const eventLower = eventName.toLowerCase();
+    
+    if (eventLower.includes('failed') || eventLower.includes('error') || eventLower.includes('violation')) {
+      return RiskLevel.MEDIUM;
+    } else if (eventLower.includes('unauthorized') || eventLower.includes('suspicious')) {
+      return RiskLevel.HIGH;
+    } else if (eventLower.includes('critical') || eventLower.includes('emergency')) {
+      return RiskLevel.CRITICAL;
+    } else {
+      return RiskLevel.LOW;
+    }
+  }
+
+  /**
    * Log user activity with detailed context
    * @param {string} userEmail - User email
    * @param {string} activity - Activity description
@@ -315,6 +372,52 @@ class SecurityAuditor {
     
     // Check for rapid successive actions
     this.checkRapidActions(userEmail, activityEvent, recentActivities);
+  }
+
+  /**
+   * Analyze audit event for suspicious activity
+   * @param {Object} auditEvent - Audit event to analyze
+   */
+  analyzeForSuspiciousActivity(auditEvent) {
+    // Check for repeated failed authentication attempts
+    if (auditEvent.action === 'auth_failure') {
+      const recentFailures = this.auditLog.filter(e => 
+        e.userEmail === auditEvent.userEmail &&
+        e.action === 'auth_failure' &&
+        (auditEvent.timestamp.getTime() - e.timestamp.getTime()) < (60 * 60 * 1000) // Last hour
+      );
+      
+      if (recentFailures.length >= this.thresholds.failedLoginAttempts) {
+        this.logSuspiciousActivity(
+          auditEvent.userEmail,
+          'multiple_failed_logins',
+          {
+            failureCount: recentFailures.length,
+            timeWindow: '1 hour'
+          }
+        );
+      }
+    }
+    
+    // Check for unauthorized access patterns
+    if (auditEvent.action === 'access_denied') {
+      const recentDenials = this.auditLog.filter(e => 
+        e.userEmail === auditEvent.userEmail &&
+        e.action === 'access_denied' &&
+        (auditEvent.timestamp.getTime() - e.timestamp.getTime()) < (60 * 60 * 1000) // Last hour
+      );
+      
+      if (recentDenials.length >= this.thresholds.accessDenialsPerHour) {
+        this.logSuspiciousActivity(
+          auditEvent.userEmail,
+          'privilege_escalation_attempts',
+          {
+            denialCount: recentDenials.length,
+            timeWindow: '1 hour'
+          }
+        );
+      }
+    }
   }
 
   /**
@@ -760,6 +863,32 @@ class SecurityAuditor {
     });
 
     return hourlyCounts.map((count, hour) => ({ hour, count }));
+  }
+
+  /**
+   * Calculate risk trends over time
+   * @param {Object[]} events - Audit events
+   * @returns {Object} Risk trends
+   */
+  calculateRiskTrends(events) {
+    const riskByDay = {};
+    
+    events.forEach(event => {
+      const date = event.timestamp.toISOString().split('T')[0];
+      if (!riskByDay[date]) {
+        riskByDay[date] = {
+          low: 0,
+          medium: 0,
+          high: 0,
+          critical: 0
+        };
+      }
+      riskByDay[date][event.riskLevel]++;
+    });
+
+    return Object.entries(riskByDay)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, risks]) => ({ date, ...risks }));
   }
 
   /**
