@@ -360,6 +360,63 @@ function include(filename) {
  * @returns {ContractData[]} Array of contract data
  */
 /**
+ * Test function to verify AL_Extract sheet and data
+ * Run this in Google Apps Script to diagnose issues
+ */
+function testALExtractSheet() {
+  console.log('=== Testing AL_Extract Sheet ===');
+  
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    console.log('Spreadsheet:', spreadsheet.getName());
+    console.log('Spreadsheet ID:', spreadsheet.getId());
+    
+    const allSheets = spreadsheet.getSheets();
+    console.log('Available sheets:', allSheets.map(s => s.getName()).join(', '));
+    
+    const sheet = spreadsheet.getSheetByName('AL_Extract');
+    if (!sheet) {
+      return {
+        success: false,
+        error: 'AL_Extract sheet not found',
+        availableSheets: allSheets.map(s => s.getName())
+      };
+    }
+    
+    console.log('Found AL_Extract sheet');
+    
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    
+    console.log('Total rows:', values.length);
+    
+    if (values.length > 0) {
+      console.log('Headers:', values[0].join(', '));
+    }
+    
+    if (values.length > 1) {
+      console.log('First data row:', values[1].join(', '));
+    }
+    
+    return {
+      success: true,
+      sheetName: sheet.getName(),
+      rowCount: values.length,
+      headers: values[0],
+      sampleRow: values.length > 1 ? values[1] : null
+    };
+    
+  } catch (error) {
+    console.error('Error:', error.message);
+    return {
+      success: false,
+      error: error.message,
+      stack: error.stack
+    };
+  }
+}
+
+/**
  * Load contract data with caching for performance
  * @returns {ContractData[]} Array of contract data
  */
