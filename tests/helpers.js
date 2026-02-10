@@ -3,6 +3,16 @@
  * These mirror the logic in the dashboard client code.
  */
 
+// --- Currency Parser ---
+// Handles both raw numbers and currency-formatted strings like "$3,714,230.41"
+function parseCurrency(val) {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  var cleaned = String(val).replace(/[$,\s]/g, '');
+  var n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
 // --- Table column rendering logic ---
 function renderAwardValueCell(contract) {
   // Award Value column should show "N/A" — never duplicate CEILING
@@ -10,7 +20,7 @@ function renderAwardValueCell(contract) {
 }
 
 function renderCeilingCell(contract) {
-  return formatMoney(parseFloat(contract.CEILING) || 0);
+  return formatMoney(parseCurrency(contract.CEILING));
 }
 
 function formatMoney(n) {
@@ -35,7 +45,7 @@ function aggregateOrgCeiling(data) {
   var sums = {};
   for (var i = 0; i < data.length; i++) {
     var org = String(data[i].Client_Bureau || '');
-    var ceil = parseFloat(data[i].CEILING) || 0;
+    var ceil = parseCurrency(data[i].CEILING);
     if (!sums[org]) sums[org] = 0;
     sums[org] += ceil;
   }
@@ -65,7 +75,7 @@ function aggregateTrendsCeiling(data) {
     if (!d) continue;
     var year = new Date(d).getFullYear();
     if (isNaN(year)) continue;
-    var ceil = parseFloat(data[i].CEILING) || 0;
+    var ceil = parseCurrency(data[i].CEILING);
     if (!sums[year]) sums[year] = 0;
     sums[year] += ceil;
   }
@@ -104,7 +114,7 @@ function filterByDateRange(data, dateField, startDate, endDate) {
 function filterByFinancialRange(data, min, max) {
   if (min === null && max === null) return data;
   return data.filter(function(c) {
-    var ceil = parseFloat(c.CEILING) || 0;
+    var ceil = parseCurrency(c.CEILING);
     if (min !== null && ceil < min) return false;
     if (max !== null && ceil > max) return false;
     return true;
@@ -123,7 +133,7 @@ function computeSummaryTotals(filteredData) {
     var status = String(c.AWARD_STATUS || '').toLowerCase();
     if (status === 'active') active++;
     if (status === 'completed' || status === 'closed') completed++;
-    totalCeiling += (parseFloat(c.CEILING) || 0);
+    totalCeiling += parseCurrency(c.CEILING);
   }
   return { totalCeiling: totalCeiling, active: active, completed: completed, total: filteredData.length };
 }
@@ -144,7 +154,7 @@ function getColumnValue(contract, column) {
   switch (column) {
     case 'award': return contract.AWARD || '';
     case 'project': return contract.PROJECT_TITLE || contract.PROJECT || '';
-    case 'ceiling': return parseFloat(contract.CEILING) || 0;
+    case 'ceiling': return parseCurrency(contract.CEILING);
     case 'status': return contract.AWARD_STATUS || '';
     case 'projectStart': return contract.PROJECT_START || '';
     case 'projectEnd': return contract.PROJECT_END || '';
@@ -171,6 +181,7 @@ function compareValues(a, b, column) {
 }
 
 module.exports = {
+  parseCurrency,
   renderAwardValueCell,
   renderCeilingCell,
   formatMoney,

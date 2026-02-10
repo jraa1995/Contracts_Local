@@ -15,6 +15,16 @@ function debugLog(msg) {
   console.log(new Date().toLocaleTimeString() + ' — ' + msg);
 }
 
+// ---- Currency Parser ----
+// Handles both raw numbers and currency-formatted strings like "$3,714,230.41"
+function parseCurrency(val) {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  var cleaned = String(val).replace(/[$,\s]/g, '');
+  var n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', function() {
   debugLog('DOM ready, starting dashboard init...');
@@ -114,8 +124,15 @@ function finishLoading() {
     return;
   }
   
+  // Normalize data — clean CEILING values (may arrive as "$3,714,230.41")
+  for (var i = 0; i < contractData.length; i++) {
+    contractData[i].CEILING = parseCurrency(contractData[i].CEILING);
+  }
+  
   filteredData = contractData.slice();
   debugLog('Rendering dashboard with ' + contractData.length + ' contracts');
+  debugLog('Sample contract keys: ' + Object.keys(contractData[0]).join(', '));
+  debugLog('Sample contract: ' + JSON.stringify(contractData[0]).substring(0, 300));
   
   // Populate filters
   populateFilters();
@@ -137,7 +154,7 @@ function updateSummaryCards() {
     var status = String(c.AWARD_STATUS || '').toLowerCase();
     if (status === 'active') active++;
     if (status === 'completed' || status === 'closed') completed++;
-    totalCeiling += (parseFloat(c.CEILING) || 0);
+    totalCeiling += (parseCurrency(c.CEILING));
   }
   
   setText('totalValue', formatMoney(totalCeiling));
@@ -183,7 +200,7 @@ function renderTable(data) {
       '<td>' + esc(c.AWARD) + '</td>' +
       '<td>' + esc(c.PROJECT_TITLE || c.PROJECT) + '</td>' +
       '<td>N/A</td>' +
-      '<td>' + formatMoney(parseFloat(c.CEILING) || 0) + '</td>' +
+      '<td>' + formatMoney(parseCurrency(c.CEILING)) + '</td>' +
       '<td><span class="status-badge ' + statusClass(c.AWARD_STATUS) + '">' + esc(c.AWARD_STATUS) + '</span></td>' +
       '<td>' + formatDate(c.PROJECT_START) + '</td>' +
       '<td>' + formatDate(c.PROJECT_END) + '</td>' +
@@ -242,14 +259,22 @@ function populateFilters() {
     if (c.CONTRACT_TYPE) types[c.CONTRACT_TYPE] = true;
   }
   
-  fillSelect('statusFilter', Object.keys(statuses).sort());
-  fillSelect('organizationFilter', Object.keys(orgs).sort());
-  fillSelect('contractTypeFilter', Object.keys(types).sort());
+  var statusKeys = Object.keys(statuses).sort();
+  var orgKeys = Object.keys(orgs).sort();
+  var typeKeys = Object.keys(types).sort();
+  
+  debugLog('Filter values found — Statuses: [' + statusKeys.join(', ') + '] (' + statusKeys.length + ')');
+  debugLog('Filter values found — Orgs: [' + orgKeys.join(', ') + '] (' + orgKeys.length + ')');
+  debugLog('Filter values found — Types: [' + typeKeys.join(', ') + '] (' + typeKeys.length + ')');
+  
+  fillSelect('statusFilter', statusKeys);
+  fillSelect('organizationFilter', orgKeys);
+  fillSelect('contractTypeFilter', typeKeys);
   
   // Build checkbox dropdown menus
-  buildDropdownMenu('statusMenu', Object.keys(statuses).sort(), 'statusFilter', 'statusToggle', 'All Statuses');
-  buildDropdownMenu('orgMenu', Object.keys(orgs).sort(), 'organizationFilter', 'orgToggle', 'All Organizations');
-  buildDropdownMenu('typeMenu', Object.keys(types).sort(), 'contractTypeFilter', 'typeToggle', 'All Types');
+  buildDropdownMenu('statusMenu', statusKeys, 'statusFilter', 'statusToggle', 'All Statuses');
+  buildDropdownMenu('orgMenu', orgKeys, 'organizationFilter', 'orgToggle', 'All Organizations');
+  buildDropdownMenu('typeMenu', typeKeys, 'contractTypeFilter', 'typeToggle', 'All Types');
   
   // Setup dropdown toggles
   setupDropdownToggle('statusToggle', 'statusMenu');
@@ -420,7 +445,7 @@ function applyFilters() {
   var finMax = parseFloat((document.getElementById('financialMax') || {}).value);
   if (!isNaN(finMin) || !isNaN(finMax)) {
     filteredData = filteredData.filter(function(c) {
-      var ceil = parseFloat(c.CEILING) || 0;
+      var ceil = parseCurrency(c.CEILING);
       if (!isNaN(finMin) && ceil < finMin) return false;
       if (!isNaN(finMax) && ceil > finMax) return false;
       return true;
@@ -820,7 +845,7 @@ var ChartManager = {
     var sums = {};
     for (var i = 0; i < data.length; i++) {
       var org = String(data[i].Client_Bureau || data[i].client_organization || 'Unknown');
-      sums[org] = (sums[org] || 0) + (parseFloat(data[i].CEILING) || 0);
+      sums[org] = (sums[org] || 0) + parseCurrency(data[i].CEILING);
     }
     var entries = Object.keys(sums).map(function(o) { return { org: o, total: sums[o] }; });
     entries.sort(function(a, b) { return b.total - a.total; });
@@ -893,7 +918,7 @@ var ChartManager = {
       if (!d) continue;
       var year = new Date(d).getFullYear();
       if (isNaN(year)) continue;
-      sums[year] = (sums[year] || 0) + (parseFloat(data[i].CEILING) || 0);
+      sums[year] = (sums[year] || 0) + parseCurrency(data[i].CEILING);
     }
     var years = Object.keys(sums).map(Number).sort(function(a,b){return a-b;});
     if (years.length === 0) return this.showEmpty('trendsChart');
@@ -960,7 +985,7 @@ function getSortValue(contract, column) {
   switch (column) {
     case 'award': return contract.AWARD || '';
     case 'project': return contract.PROJECT_TITLE || contract.PROJECT || '';
-    case 'ceiling': return parseFloat(contract.CEILING) || 0;
+    case 'ceiling': return parseCurrency(contract.CEILING);
     case 'awardValue': return 0; // N/A column
     case 'status': return contract.AWARD_STATUS || '';
     case 'projectStart': return contract.PROJECT_START || '';
