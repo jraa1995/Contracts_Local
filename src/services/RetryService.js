@@ -168,6 +168,11 @@ class RetryService {
    * @returns {Promise} Promise that resolves with operation result or rejects on timeout
    */
   async executeWithTimeout(operation, timeoutMs) {
+    // Skip timeout in Google Apps Script environment
+    if (typeof setTimeout === 'undefined') {
+      return await operation();
+    }
+    
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error(`Operation timed out after ${timeoutMs}ms`));
@@ -238,6 +243,10 @@ class RetryService {
    * @returns {Promise} Promise that resolves after delay
    */
   async delay(ms) {
+    // Skip delay in Google Apps Script environment
+    if (typeof setTimeout === 'undefined') {
+      return Promise.resolve();
+    }
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 

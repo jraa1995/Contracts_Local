@@ -12,7 +12,7 @@ class DataService {
     this.lastCacheTime = null;
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
     this.spreadsheetId = spreadsheetId;
-    this.sheetName = 'Sheet1'; // Default sheet name
+    this.sheetName = 'AL_Extract'; // Sheet containing contract data
     
     // Initialize optimization manager (coordinates all optimization services)
     this.optimizationManager = new OptimizationManager();
@@ -62,6 +62,52 @@ class DataService {
       
     } catch (error) {
       console.error('Error loading contract data:', error);
+      throw new Error(`Failed to load contract data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Synchronous version for Google Apps Script server-side calls
+   * @returns {ContractData[]} Array of contract data
+   */
+  loadContractDataSync() {
+    try {
+      // Check cache first
+      const cacheKey = this.cachingService.createContractDataKey(
+        this.spreadsheetId || 'active',
+        this.sheetName
+      );
+      
+      const cachedData = this.cachingService.get(cacheKey, 'contractData');
+      if (cachedData) {
+        console.log('DataService: Returning cached data');
+        this.performanceMetrics.cacheHits++;
+        return cachedData;
+      }
+      
+      this.performanceMetrics.cacheMisses++;
+      
+      // Load data directly (synchronous)
+      const rawData = this.loadRawDataFromSheetsDirectly();
+      
+      // Validate data integrity
+      const validationResult = this.validateDataIntegrity(rawData);
+      
+      if (!validationResult.isValid) {
+        console.error('Data validation failed:', validationResult.errors);
+      }
+
+      // Transform raw data
+      const transformedData = this.transformRawData(rawData);
+      
+      // Cache the result
+      this.cachingService.set(cacheKey, transformedData, 'contractData');
+      
+      console.log(`DataService: Loaded and transformed ${transformedData.length} contracts`);
+      return transformedData;
+      
+    } catch (error) {
+      console.error('Error loading contract data (sync):', error);
       throw new Error(`Failed to load contract data: ${error.message}`);
     }
   }

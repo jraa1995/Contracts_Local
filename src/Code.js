@@ -405,14 +405,15 @@ function getContractData() {
       throw new Error('Data service not available');
     }
     
-    // Load data with retry logic
+    // Load data with retry logic (synchronous for Google Apps Script)
     let data;
     let attempts = 0;
     const maxAttempts = APP_CONFIG.maxRetryAttempts;
     
     while (attempts < maxAttempts) {
       try {
-        data = appState.services.dataService.loadContractData();
+        // Call loadContractData synchronously (it will handle async internally)
+        data = appState.services.dataService.loadContractDataSync();
         break;
       } catch (error) {
         attempts++;
