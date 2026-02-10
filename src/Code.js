@@ -273,50 +273,18 @@ function setupPeriodicMaintenance() {
  * @returns {HtmlOutput} HTML page for the dashboard
  */
 function doGet(e) {
-  const requestStart = new Date();
-  
   try {
-    // Initialize application if not already done
-    if (!appState.initialized) {
-      initializeApplication();
-    }
-    
-    // Track active user
-    const user = Session.getActiveUser();
-    if (user && user.getEmail()) {
-      appState.activeUsers.add(user.getEmail());
-    }
-    
     // Create and configure HTML output
     const template = HtmlService.createTemplateFromFile('dashboard');
     
-    // Pass configuration to template
-    template.appConfig = APP_CONFIG;
-    template.userEmail = user ? user.getEmail() : 'anonymous';
-    template.initTime = new Date().toISOString();
-    
     const htmlOutput = template.evaluate()
-      .setTitle(`${APP_CONFIG.name} v${APP_CONFIG.version}`)
+      .setTitle('Contract Management Dashboard')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-    
-    // Update performance metrics
-    const responseTime = new Date() - requestStart;
-    updatePerformanceMetrics(responseTime);
-    
-    // Log page access
-    if (appState.services.securityAuditor) {
-      appState.services.securityAuditor.logEvent('page_accessed', {
-        user: user ? user.getEmail() : 'anonymous',
-        responseTime: responseTime,
-        userAgent: e ? e.parameter.userAgent : 'unknown'
-      });
-    }
     
     return htmlOutput;
     
   } catch (error) {
     console.error('Error serving dashboard:', error);
-    appState.performanceMetrics.errorCount++;
     
     // Return error page
     return createErrorPage(error);
@@ -391,73 +359,53 @@ function include(filename) {
  * Enhanced API endpoint to get contract data with comprehensive error handling
  * @returns {ContractData[]} Array of contract data
  */
+/**
+ * Simple, fast data loading from AL_Extract sheet
+ * @returns {ContractData[]} Array of contract data
+ */
 function getContractData() {
-  const requestStart = new Date();
-  
   try {
-    console.log('getContractData: Starting...');
+    console.log('Loading data from AL_Extract sheet...');
     
-    // Ensure application is initialized
-    if (!appState.initialized) {
-      console.log('getContractData: Initializing application...');
-      initializeApplication();
+    // Get the active spreadsheet
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet.getSheetByName('AL_Extract');
+    
+    if (!sheet) {
+      throw new Error('AL_Extract sheet not found');
     }
     
-    // Check service health
-    if (!appState.services.dataService) {
-      throw new Error('Data service not available');
+    // Get all data
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    
+    if (values.length <= 1) {
+      console.log('No data found in AL_Extract sheet');
+      return [];
     }
     
-    console.log('getContractData: Loading data from sheet...');
+    // First row is headers
+    const headers = values[0];
+    const data = [];
     
-    // Load data with retry logic (synchronous for Google Apps Script)
-    let data;
-    let attempts = 0;
-    const maxAttempts = APP_CONFIG.maxRetryAttempts;
-    
-    while (attempts < maxAttempts) {
-      try {
-        console.log(`getContractData: Attempt ${attempts + 1} of ${maxAttempts}`);
-        // Call loadContractData synchronously (it will handle async internally)
-        data = appState.services.dataService.loadContractDataSync();
-        console.log(`getContractData: Successfully loaded ${data ? data.length : 0} records`);
-        break;
-      } catch (error) {
-        attempts++;
-        console.error(`getContractData: Attempt ${attempts} failed:`, error.message);
-        if (attempts >= maxAttempts) {
-          throw error;
-        }
-        console.warn(`Data loading attempt ${attempts} failed, retrying...`);
-        Utilities.sleep(1000 * attempts); // Exponential backoff
+    // Convert rows to objects
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      const contract = {};
+      
+      for (let j = 0; j < headers.length; j++) {
+        const header = headers[j];
+        contract[header] = row[j];
       }
+      
+      data.push(contract);
     }
     
-    // Update performance metrics
-    const responseTime = new Date() - requestStart;
-    updatePerformanceMetrics(responseTime);
-    
-    // Log successful data access
-    if (appState.services.securityAuditor) {
-      appState.services.securityAuditor.logEvent('data_accessed', {
-        user: Session.getActiveUser().getEmail(),
-        recordCount: data ? data.length : 0,
-        responseTime: responseTime,
-        attempts: attempts
-      });
-    }
-    
-    return data || [];
+    console.log(`Loaded ${data.length} contracts from AL_Extract`);
+    return data;
     
   } catch (error) {
     console.error('Error loading contract data:', error);
-    appState.performanceMetrics.errorCount++;
-    appState.performanceMetrics.lastError = {
-      message: error.message,
-      timestamp: new Date(),
-      context: 'getContractData'
-    };
-    
     throw new Error('Failed to load contract data: ' + error.message);
   }
 }
