@@ -662,12 +662,14 @@ class DashboardController {
   cleanup() {
     // Remove event listeners
     this.eventListeners.forEach(({ element, event, handler }) => {
-      element.removeEventListener(event, handler);
+      if (element && element.removeEventListener) {
+        element.removeEventListener(event, handler);
+      }
     });
     this.eventListeners = [];
     
     // Clear intervals
-    if (this.healthMonitorInterval) {
+    if (this.healthMonitorInterval && typeof clearInterval !== 'undefined') {
       clearInterval(this.healthMonitorInterval);
     }
     

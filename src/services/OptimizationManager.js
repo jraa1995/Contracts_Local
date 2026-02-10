@@ -279,6 +279,12 @@ class OptimizationManager {
    * Start performance monitoring
    */
   startPerformanceMonitoring() {
+    // Only run in browser environment
+    if (typeof setInterval === 'undefined') {
+      console.log('OptimizationManager: Performance monitoring skipped (not in browser environment)');
+      return;
+    }
+    
     // Monitor execution time
     setInterval(() => {
       if (this.config.enableExecutionTimeMonitoring) {

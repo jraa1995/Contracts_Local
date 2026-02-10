@@ -463,6 +463,12 @@ class VisualizationManager {
    * @param {number} interval - Refresh interval in milliseconds (default: 30 seconds)
    */
   enableAutoRefresh(dataProvider, interval = 30000) {
+    // Only run in browser environment
+    if (typeof setInterval === 'undefined' || typeof clearInterval === 'undefined') {
+      console.log('VisualizationManager: Auto-refresh not available (not in browser environment)');
+      return;
+    }
+    
     if (this.autoRefreshInterval) {
       clearInterval(this.autoRefreshInterval);
     }
@@ -483,7 +489,7 @@ class VisualizationManager {
    * Disable automatic chart refresh
    */
   disableAutoRefresh() {
-    if (this.autoRefreshInterval) {
+    if (this.autoRefreshInterval && typeof clearInterval !== 'undefined') {
       clearInterval(this.autoRefreshInterval);
       this.autoRefreshInterval = null;
     }
