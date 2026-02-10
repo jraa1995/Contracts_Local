@@ -1,1661 +1,463 @@
 <script>
 /**
- * Dashboard JavaScript - Client-side functionality
- * Handles user interactions, data visualization, and API communication
+ * Dashboard Client-Side Code
+ * Loads data from AL_Extract via paginated server calls, renders table and summary.
  */
 
-// Global variables
-let dashboardController;
-let filterController;
-let visualizationManager;
-let dataTableManager;
-let contractData = [];
-let filteredData = [];
+// ---- State ----
+var contractData = [];
+var filteredData = [];
+var currentPage = 1;
+var tablePageSize = 50;
 
-/**
- * Initialize the dashboard when page loads
- */
+// ---- Debug Logger (visible on screen) ----
+function debugLog(msg) {
+  console.log(msg);
+  var el = document.getElementById('debugLog');
+  if (el) {
+    el.style.display = 'block';
+    el.innerHTML += '<div>' + new Date().toLocaleTimeString() + ' — ' + msg + '</div>';
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+// ---- Init ----
 document.addEventListener('DOMContentLoaded', function() {
-    initializeDashboard();
+  debugLog('DOM ready, starting dashboard init...');
+  initializeDashboard();
 });
 
-/**
- * Initialize dashboard components and load data
- */
-async function initializeDashboard() {
-    try {
-        showLoading(true);
-        
-        // Initialize controllers
-        dashboardController = new DashboardController();
-        filterController = new FilterController();
-        visualizationManager = new VisualizationManager();
-        dataTableManager = new DataTableManager();
-        
-        // Set up event listeners
-        setupEventListeners();
-        setupChartEventListeners();
-        
-        // Load initial data
-        await loadDashboardData();
-        
-        // Enable auto-refresh (optional)
-        // enableAutoRefresh();
-        
+function initializeDashboard() {
+  showLoading(true, 'Connecting to data source...');
+  
+  // First: quick test with 5 rows to verify pipeline
+  debugLog('Testing data pipeline with 5 rows...');
+  google.script.run
+    .withSuccessHandler(function(result) {
+      debugLog('Test result: ' + JSON.stringify(result).substring(0, 300));
+      if (result && result.success && result.data && result.data.length > 0) {
+        debugLog('Pipeline OK. Columns: ' + (result.columns || []).join(', '));
+        debugLog('Sample row: ' + JSON.stringify(result.data[0]).substring(0, 200));
+        // Pipeline works — now load all data in pages
+        loadAllPages();
+      } else {
+        debugLog('ERROR: Test returned no data. Result: ' + JSON.stringify(result));
         showLoading(false);
-    } catch (error) {
-        console.error('Dashboard initialization error:', error);
-        showError('Failed to initialize dashboard: ' + error.message);
+        showError('No data returned from AL_Extract sheet. Check that the sheet exists and has data starting at row 3.');
+      }
+    })
+    .withFailureHandler(function(err) {
+      debugLog('ERROR in test call: ' + (err.message || err));
+      showLoading(false);
+      showError('Server error: ' + (err.message || err));
+    })
+    .getContractDataTest();
+}
+
+// ---- Paginated Data Loading ----
+function loadAllPages() {
+  debugLog('Getting contract info...');
+  google.script.run
+    .withSuccessHandler(function(info) {
+      if (!info || !info.success) {
+        debugLog('ERROR getting info: ' + JSON.stringify(info));
         showLoading(false);
-    }
+        showError('Could not get contract info: ' + (info ? info.error : 'unknown'));
+        return;
+      }
+      debugLog('Total data rows: ' + info.totalRows);
+      var pageSize = 500;
+      var totalPages = Math.ceil(info.totalRows / pageSize);
+      debugLog('Will load ' + totalPages + ' pages of ' + pageSize + ' rows each');
+      contractData = [];
+      loadPage(0, totalPages, pageSize);
+    })
+    .withFailureHandler(function(err) {
+      debugLog('ERROR getting info: ' + (err.message || err));
+      showLoading(false);
+      showError('Failed to get contract info: ' + (err.message || err));
+    })
+    .getContractInfo();
 }
 
-/**
- * Load contract data from Google Apps Script
- */
-async function loadDashboardData() {
-    try {
-        console.log('Starting data load from Google Apps Script...');
-        
-        // Call Google Apps Script function
-        const data = await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Request timed out after 120 seconds'));
-            }, 120000);
-            
-            google.script.run
-                .withSuccessHandler((result) => {
-                    clearTimeout(timeout);
-                    console.log('Data loaded successfully:', result ? result.length : 0, 'records');
-                    if (!result || result.length === 0) {
-                        console.warn('No data returned from server');
-                    }
-                    resolve(result);
-                })
-                .withFailureHandler((error) => {
-                    clearTimeout(timeout);
-                    console.error('Google Apps Script error:', error);
-                    reject(error);
-                })
-                .getContractData();
-        });
-        
-        console.log('Processing loaded data...');
-        contractData = data || [];
-        filteredData = [...contractData];
-        
-        if (contractData.length === 0) {
-            showError('No contract data found in AL_Extract sheet. Please check that the sheet exists and contains data.');
-            return;
-        }
-        
-        console.log('Initializing components with', contractData.length, 'contracts');
-        
-        // Initialize components with data
-        filterController.initializeFilters(contractData);
-        
-        // Initialize charts with data
-        initializeCharts();
-        
-        // Update dashboard
-        updateDashboard();
-        
-        console.log('Dashboard data loaded successfully');
-        
-    } catch (error) {
-        console.error('Error loading data:', error);
-        console.error('Error details:', error.message, error.stack);
-        showError('Failed to load contract data: ' + error.message);
-        throw error;
-    }
+function loadPage(page, totalPages, pageSize) {
+  if (page >= totalPages) {
+    debugLog('All pages loaded. Total contracts: ' + contractData.length);
+    finishLoading();
+    return;
+  }
+  
+  var pct = Math.round(((page + 1) / totalPages) * 100);
+  showLoading(true, 'Loading page ' + (page + 1) + ' of ' + totalPages + ' (' + pct + '%)');
+  debugLog('Loading page ' + (page + 1) + '/' + totalPages + '...');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result && result.success && result.data) {
+        contractData = contractData.concat(result.data);
+        debugLog('Page ' + (page + 1) + ' loaded: ' + result.data.length + ' rows (total so far: ' + contractData.length + ')');
+      } else {
+        debugLog('Page ' + (page + 1) + ' returned no data: ' + JSON.stringify(result).substring(0, 200));
+      }
+      // Load next page
+      loadPage(page + 1, totalPages, pageSize);
+    })
+    .withFailureHandler(function(err) {
+      debugLog('ERROR loading page ' + (page + 1) + ': ' + (err.message || err));
+      // Continue with what we have
+      debugLog('Continuing with ' + contractData.length + ' contracts loaded so far');
+      finishLoading();
+    })
+    .getContractPage(page, pageSize);
 }
 
-/**
- * Update all dashboard components
- */
-function updateDashboard() {
-    console.log('updateDashboard called, filteredData length:', filteredData.length);
-    updateSummaryCards();
-    updateCharts();
-    updateDataTable();
-    updateFilterOptions();
+function finishLoading() {
+  showLoading(false);
+  
+  if (contractData.length === 0) {
+    debugLog('No contracts loaded!');
+    showError('No contract data was loaded. Check the AL_Extract sheet.');
+    return;
+  }
+  
+  filteredData = contractData.slice();
+  debugLog('Rendering dashboard with ' + contractData.length + ' contracts');
+  
+  // Populate filters
+  populateFilters();
+  
+  // Render everything
+  updateSummaryCards();
+  renderTable(filteredData);
+  setupEventListeners();
+  
+  debugLog('Dashboard ready.');
 }
 
-/**
- * Initialize charts after data is loaded
- */
-function initializeCharts() {
-    console.log('initializeCharts called, contractData length:', contractData.length);
-    if (visualizationManager && contractData.length > 0) {
-        visualizationManager.initializeCharts(contractData);
-    }
-}
-
-/**
- * Update summary cards with current data
- */
+// ---- Summary Cards ----
 function updateSummaryCards() {
-    console.log('updateSummaryCards called, filteredData length:', filteredData.length);
-    const summary = calculateSummary(filteredData);
-    console.log('Summary:', JSON.stringify(summary));
-    const formatted = formatFinancialSummary(summary);
-    
-    document.getElementById('totalValue').textContent = formatted.totalValue;
-    document.getElementById('activeCount').textContent = summary.activeCount;
-    document.getElementById('completedCount').textContent = summary.completedCount;
-    document.getElementById('budgetUtilization').textContent = formatted.budgetUtilization;
+  var active = 0, completed = 0, totalCeiling = 0;
+  for (var i = 0; i < filteredData.length; i++) {
+    var c = filteredData[i];
+    var status = String(c.AWARD_STATUS || '').toLowerCase();
+    if (status === 'active') active++;
+    if (status === 'completed' || status === 'closed') completed++;
+    totalCeiling += (parseFloat(c.CEILING) || 0);
+  }
+  
+  setText('totalValue', formatMoney(totalCeiling));
+  setText('activeCount', String(active));
+  setText('completedCount', String(completed));
+  setText('budgetUtilization', filteredData.length + ' total');
 }
 
-/**
- * Calculate summary statistics
- * Column names from AL_Extract: AWARD_STATUS, CEILING, AWARD, PROJECT, etc.
- */
-function calculateSummary(data) {
-    const activeContracts = data.filter(c => c.AWARD_STATUS === 'Active' || c.AWARD_STATUS === 'active');
-    const completedContracts = data.filter(c => c.AWARD_STATUS === 'Completed' || c.AWARD_STATUS === 'completed' || c.AWARD_STATUS === 'Closed');
-    const totalValue = data.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
-    const totalCeiling = data.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
-    const activeValue = activeContracts.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
-    const completedValue = completedContracts.reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
-    const averageValue = data.length > 0 ? totalValue / data.length : 0;
-    const remainingBudget = totalCeiling - totalValue;
-    
-    return {
-        totalValue: totalValue,
-        totalCeiling: totalCeiling,
-        activeValue: activeValue,
-        completedValue: completedValue,
-        averageValue: averageValue,
-        activeCount: activeContracts.length,
-        completedCount: completedContracts.length,
-        budgetUtilization: totalCeiling > 0 ? (totalValue / totalCeiling) * 100 : 0,
-        remainingBudget: remainingBudget
-    };
+function formatMoney(n) {
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+  return '$' + n.toFixed(0);
 }
 
-/**
- * Update charts with current data
- */
-function updateCharts() {
-    if (visualizationManager) {
-        visualizationManager.updateCharts(filteredData);
-    }
+function setText(id, text) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
 
-/**
- * Update data table with current data
- */
-function updateDataTable() {
-    console.log('updateDataTable called, filteredData length:', filteredData.length);
-    if (filteredData.length > 0) {
-        console.log('First contract keys:', Object.keys(filteredData[0]).join(', '));
-        console.log('First contract sample:', JSON.stringify(filteredData[0]).substring(0, 500));
-    }
-    if (dataTableManager) {
-        dataTableManager.renderTable(filteredData);
-    }
+// ---- Table Rendering ----
+function renderTable(data) {
+  var tbody = document.querySelector('#contractsTable tbody');
+  if (!tbody) { debugLog('ERROR: #contractsTable tbody not found'); return; }
+  
+  tbody.innerHTML = '';
+  
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;">No contracts found.</td></tr>';
+    setText('paginationInfo', 'Showing 0 of 0 contracts');
+    return;
+  }
+  
+  // Paginate
+  var start = (currentPage - 1) * tablePageSize;
+  var end = Math.min(start + tablePageSize, data.length);
+  var pageData = data.slice(start, end);
+  
+  for (var i = 0; i < pageData.length; i++) {
+    var c = pageData[i];
+    var tr = document.createElement('tr');
+    tr.innerHTML = 
+      '<td>' + esc(c.AWARD) + '</td>' +
+      '<td>' + esc(c.PROJECT_TITLE || c.PROJECT) + '</td>' +
+      '<td>' + formatMoney(parseFloat(c.CEILING) || 0) + '</td>' +
+      '<td>' + formatMoney(parseFloat(c.CEILING) || 0) + '</td>' +
+      '<td><span class="status-badge ' + statusClass(c.AWARD_STATUS) + '">' + esc(c.AWARD_STATUS) + '</span></td>' +
+      '<td>' + formatDate(c.PROJECT_START) + '</td>' +
+      '<td>' + formatDate(c.PROJECT_END) + '</td>' +
+      '<td>' + esc(c.Client_Bureau || c.client_organization) + '</td>';
+    tbody.appendChild(tr);
+  }
+  
+  setText('paginationInfo', 'Showing ' + (start + 1) + '-' + end + ' of ' + data.length + ' contracts');
+  updatePaginationButtons(data.length);
 }
 
-/**
- * Update filter dropdown options using actual AL_Extract column names
- */
-function updateFilterOptions() {
-    // Update organization filter options
-    const organizations = [...new Set(contractData.map(c => c.Client_Bureau || c.client_organization).filter(Boolean))];
-    updateSelectOptions('organizationFilter', organizations);
-    
-    // Update contract type filter options
-    const contractTypes = [...new Set(contractData.map(c => c.CONTRACT_TYPE).filter(Boolean))];
-    updateSelectOptions('contractTypeFilter', contractTypes);
-    
-    // Update status filter options from actual data
-    const statuses = [...new Set(contractData.map(c => c.AWARD_STATUS).filter(Boolean))];
-    updateSelectOptions('statusFilter', statuses);
-    
-    // Update selected counts
-    updateSelectedCount('statusCount', 0);
-    updateSelectedCount('organizationCount', 0);
-    updateSelectedCount('contractTypeCount', 0);
+function esc(val) {
+  if (val === null || val === undefined || val === '') return '—';
+  var s = String(val);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-/**
- * Update select element options
- */
-function updateSelectOptions(selectId, options) {
-    const select = document.getElementById(selectId);
-    if (!select) return;
-    
-    // Clear existing options except the first one (if it's a placeholder)
-    const hasPlaceholder = select.options[0] && select.options[0].value === '';
-    const startIndex = hasPlaceholder ? 1 : 0;
-    
-    while (select.options.length > startIndex) {
-        select.remove(startIndex);
-    }
-    
-    // Add new options
-    options.forEach(option => {
-        const optionElement = document.createElement('option');
-        optionElement.value = option;
-        optionElement.textContent = option;
-        select.appendChild(optionElement);
+function statusClass(status) {
+  if (!status) return 'status-default';
+  var s = String(status).toLowerCase();
+  if (s.indexOf('active') >= 0) return 'status-active';
+  if (s.indexOf('completed') >= 0 || s.indexOf('closed') >= 0) return 'status-completed';
+  if (s.indexOf('pending') >= 0) return 'status-pending';
+  if (s.indexOf('cancel') >= 0) return 'status-cancelled';
+  return 'status-default';
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  try {
+    var dt = new Date(d);
+    if (isNaN(dt.getTime())) return String(d);
+    return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch(e) { return String(d); }
+}
+
+function updatePaginationButtons(totalRows) {
+  var totalPages = Math.ceil(totalRows / tablePageSize);
+  var prev = document.getElementById('prevPageBtn');
+  var next = document.getElementById('nextPageBtn');
+  var nums = document.getElementById('pageNumbers');
+  
+  if (prev) prev.disabled = (currentPage <= 1);
+  if (next) next.disabled = (currentPage >= totalPages);
+  if (nums) nums.textContent = 'Page ' + currentPage + ' of ' + totalPages;
+}
+
+// ---- Filters ----
+function populateFilters() {
+  var statuses = {}, orgs = {}, types = {};
+  for (var i = 0; i < contractData.length; i++) {
+    var c = contractData[i];
+    if (c.AWARD_STATUS) statuses[c.AWARD_STATUS] = true;
+    var org = c.Client_Bureau || c.client_organization;
+    if (org) orgs[org] = true;
+    if (c.CONTRACT_TYPE) types[c.CONTRACT_TYPE] = true;
+  }
+  
+  fillSelect('statusFilter', Object.keys(statuses).sort());
+  fillSelect('organizationFilter', Object.keys(orgs).sort());
+  fillSelect('contractTypeFilter', Object.keys(types).sort());
+}
+
+function fillSelect(id, options) {
+  var sel = document.getElementById(id);
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (var i = 0; i < options.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = options[i];
+    opt.textContent = options[i];
+    sel.appendChild(opt);
+  }
+}
+
+function applyFilters() {
+  filteredData = contractData.slice();
+  
+  // Text search
+  var search = (document.getElementById('searchInput') || {}).value || '';
+  if (search.length > 0) {
+    var term = search.toLowerCase();
+    filteredData = filteredData.filter(function(c) {
+      return (String(c.AWARD || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.PROJECT || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.PROJECT_TITLE || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.Client_Bureau || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.client_organization || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.AWARD_STATUS || '').toLowerCase().indexOf(term) >= 0) ||
+             (String(c.AWARD_TITLE || '').toLowerCase().indexOf(term) >= 0);
     });
+  }
+  
+  // Status filter
+  var statusSel = document.getElementById('statusFilter');
+  if (statusSel) {
+    var selected = Array.from(statusSel.selectedOptions).map(function(o) { return o.value; });
+    if (selected.length > 0) {
+      filteredData = filteredData.filter(function(c) {
+        return selected.indexOf(c.AWARD_STATUS) >= 0;
+      });
+    }
+  }
+  
+  // Organization filter
+  var orgSel = document.getElementById('organizationFilter');
+  if (orgSel) {
+    var selectedOrgs = Array.from(orgSel.selectedOptions).map(function(o) { return o.value; });
+    if (selectedOrgs.length > 0) {
+      filteredData = filteredData.filter(function(c) {
+        return selectedOrgs.indexOf(c.Client_Bureau) >= 0 || selectedOrgs.indexOf(c.client_organization) >= 0;
+      });
+    }
+  }
+  
+  // Contract type filter
+  var typeSel = document.getElementById('contractTypeFilter');
+  if (typeSel) {
+    var selectedTypes = Array.from(typeSel.selectedOptions).map(function(o) { return o.value; });
+    if (selectedTypes.length > 0) {
+      filteredData = filteredData.filter(function(c) {
+        return selectedTypes.indexOf(c.CONTRACT_TYPE) >= 0;
+      });
+    }
+  }
+  
+  currentPage = 1;
+  updateSummaryCards();
+  renderTable(filteredData);
 }
 
-/**
- * Set up event listeners for user interactions
- */
+// ---- Event Listeners ----
 function setupEventListeners() {
-    // Header actions
-    document.getElementById('refreshBtn').addEventListener('click', refreshDashboard);
-    document.getElementById('exportBtn').addEventListener('click', showExportModal);
-    
-    // Filter controls
-    setupFilterEventListeners();
-    
-    // Table controls
-    document.getElementById('exportTableBtn').addEventListener('click', exportTableData);
-    document.getElementById('pageSizeSelect').addEventListener('change', handlePageSizeChange);
-    
-    // Modal controls
-    setupModalEventListeners();
-}
-
-/**
- * Set up filter event listeners
- */
-function setupFilterEventListeners() {
-    // Search input with debouncing
-    const searchInput = document.getElementById('searchInput');
-    searchInput.addEventListener('input', debounce(handleSearchFilter, 300));
-    searchInput.addEventListener('input', handleSearchInputChange);
-    
-    // Clear search button
-    document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
-    
-    // Multi-select filters
-    document.getElementById('statusFilter').addEventListener('change', handleStatusFilter);
-    document.getElementById('organizationFilter').addEventListener('change', handleOrganizationFilter);
-    document.getElementById('contractTypeFilter').addEventListener('change', handleContractTypeFilter);
-    
-    // Date range filters
-    document.getElementById('dateFieldSelect').addEventListener('change', handleDateRangeFilter);
-    document.getElementById('dateRangeStart').addEventListener('change', handleDateRangeFilter);
-    document.getElementById('dateRangeEnd').addEventListener('change', handleDateRangeFilter);
-    
-    // Date presets
-    document.querySelectorAll('.date-preset-btn').forEach(btn => {
-        btn.addEventListener('click', handleDatePreset);
+  // Search
+  var searchInput = document.getElementById('searchInput');
+  if (searchInput) {
+    var searchTimer = null;
+    searchInput.addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(applyFilters, 300);
     });
-    
-    // Financial range filters
-    document.getElementById('financialFieldSelect').addEventListener('change', handleFinancialRangeFilter);
-    document.getElementById('financialMin').addEventListener('input', debounce(handleFinancialRangeFilter, 500));
-    document.getElementById('financialMax').addEventListener('input', debounce(handleFinancialRangeFilter, 500));
-    
-    // Financial presets
-    document.querySelectorAll('.financial-preset-btn').forEach(btn => {
-        btn.addEventListener('click', handleFinancialPreset);
+  }
+  
+  // Clear search
+  var clearBtn = document.getElementById('clearSearchBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function() {
+      document.getElementById('searchInput').value = '';
+      applyFilters();
     });
-    
-    // Clear filters
-    document.getElementById('clearFiltersBtn').addEventListener('click', clearAllFilters);
-    document.getElementById('clearAllActiveFilters').addEventListener('click', clearAllFilters);
-    
-    // Save filters
-    document.getElementById('saveFiltersBtn').addEventListener('click', saveCurrentFilters);
-}
-
-/**
- * Handle search input changes (for UI updates)
- */
-function handleSearchInputChange(event) {
-    const searchTerm = event.target.value;
-    const clearBtn = document.getElementById('clearSearchBtn');
-    
-    if (searchTerm.length > 0) {
-        clearBtn.style.display = 'flex';
-    } else {
-        clearBtn.style.display = 'none';
-    }
-    
-    // Update search suggestions (simplified)
-    updateSearchSuggestions(searchTerm);
-}
-
-/**
- * Update search suggestions
- */
-function updateSearchSuggestions(searchTerm) {
-    const suggestionsContainer = document.getElementById('searchSuggestions');
-    
-    if (searchTerm.length < 2) {
-        suggestionsContainer.style.display = 'none';
-        return;
-    }
-    
-    // Simple suggestions based on existing data
-    const suggestions = [];
-    contractData.forEach(contract => {
-        if (contract.award && contract.award.toLowerCase().includes(searchTerm.toLowerCase())) {
-            suggestions.push({ type: 'Award', value: contract.award });
-        }
-        if (contract.project && contract.project.toLowerCase().includes(searchTerm.toLowerCase())) {
-            suggestions.push({ type: 'Project', value: contract.project });
-        }
+  }
+  
+  // Filter selects
+  ['statusFilter', 'organizationFilter', 'contractTypeFilter'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', applyFilters);
+  });
+  
+  // Clear all filters
+  var clearAll = document.getElementById('clearFiltersBtn');
+  if (clearAll) {
+    clearAll.addEventListener('click', function() {
+      document.getElementById('searchInput').value = '';
+      ['statusFilter', 'organizationFilter', 'contractTypeFilter'].forEach(function(id) {
+        var sel = document.getElementById(id);
+        if (sel) sel.selectedIndex = -1;
+      });
+      applyFilters();
     });
-    
-    // Limit to 5 suggestions
-    const uniqueSuggestions = suggestions.slice(0, 5);
-    
-    if (uniqueSuggestions.length > 0) {
-        suggestionsContainer.innerHTML = uniqueSuggestions
-            .map(s => `<div class="search-suggestion" data-value="${s.value}">${s.type}: ${s.value}</div>`)
-            .join('');
-        suggestionsContainer.style.display = 'block';
-        
-        // Add click handlers to suggestions
-        suggestionsContainer.querySelectorAll('.search-suggestion').forEach(suggestion => {
-            suggestion.addEventListener('click', function() {
-                document.getElementById('searchInput').value = this.getAttribute('data-value');
-                suggestionsContainer.style.display = 'none';
-                handleSearchFilter({ target: { value: this.getAttribute('data-value') } });
-            });
-        });
-    } else {
-        suggestionsContainer.style.display = 'none';
-    }
-}
-
-/**
- * Clear search input
- */
-function clearSearch() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('clearSearchBtn').style.display = 'none';
-    document.getElementById('searchSuggestions').style.display = 'none';
-    handleSearchFilter({ target: { value: '' } });
-}
-
-/**
- * Handle contract type filter change
- */
-function handleContractTypeFilter(event) {
-    const selectedTypes = Array.from(event.target.selectedOptions).map(option => option.value);
-    filteredData = filterController.applyMultiSelectFilter('contractType', selectedTypes);
-    updateSelectedCount('contractTypeCount', selectedTypes.length);
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Handle date preset selection
- */
-function handleDatePreset(event) {
-    const preset = event.target.getAttribute('data-preset');
-    const today = new Date();
-    let startDate, endDate;
-    
-    // Clear other preset selections
-    document.querySelectorAll('.date-preset-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-    
-    switch (preset) {
-        case 'last30':
-            startDate = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-            endDate = today;
-            break;
-        case 'last90':
-            startDate = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
-            endDate = today;
-            break;
-        case 'thisYear':
-            startDate = new Date(today.getFullYear(), 0, 1);
-            endDate = today;
-            break;
-    }
-    
-    if (startDate && endDate) {
-        document.getElementById('dateRangeStart').value = startDate.toISOString().split('T')[0];
-        document.getElementById('dateRangeEnd').value = endDate.toISOString().split('T')[0];
-        handleDateRangeFilter();
-    }
-}
-
-/**
- * Handle financial range filter
- */
-function handleFinancialRangeFilter() {
-    const field = document.getElementById('financialFieldSelect').value;
-    const min = parseFloat(document.getElementById('financialMin').value) || 0;
-    const max = parseFloat(document.getElementById('financialMax').value) || Infinity;
-    
-    if (min > 0 || max < Infinity) {
-        filteredData = contractData.filter(contract => {
-            const value = contract[field] || 0;
-            return value >= min && value <= max;
-        });
-    } else {
-        filteredData = [...contractData];
-    }
-    
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Handle financial preset selection
- */
-function handleFinancialPreset(event) {
-    const preset = event.target.getAttribute('data-preset');
-    
-    // Clear other preset selections
-    document.querySelectorAll('.financial-preset-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-    
-    let min, max;
-    switch (preset) {
-        case 'under100k':
-            min = 0;
-            max = 100000;
-            break;
-        case '100k-1m':
-            min = 100000;
-            max = 1000000;
-            break;
-        case 'over1m':
-            min = 1000000;
-            max = '';
-            break;
-    }
-    
-    document.getElementById('financialMin').value = min;
-    document.getElementById('financialMax').value = max;
-    handleFinancialRangeFilter();
-}
-
-/**
- * Update selected count for multi-select filters
- */
-function updateSelectedCount(countElementId, count) {
-    const countElement = document.getElementById(countElementId);
-    if (countElement) {
-        countElement.textContent = count === 0 ? '0 selected' : 
-                                  count === 1 ? '1 selected' : 
-                                  `${count} selected`;
-    }
-}
-
-/**
- * Update active filters display
- */
-function updateActiveFilters() {
-    const activeFiltersContainer = document.getElementById('activeFilters');
-    const activeFiltersList = document.getElementById('activeFiltersList');
-    
-    if (!activeFiltersContainer || !activeFiltersList) return;
-    
-    const activeFilters = [];
-    
-    // Search filter
-    const searchValue = document.getElementById('searchInput').value;
-    if (searchValue) {
-        activeFilters.push({ type: 'Search', value: searchValue, clear: 'search' });
-    }
-    
-    // Status filter
-    const statusSelected = Array.from(document.getElementById('statusFilter').selectedOptions);
-    if (statusSelected.length > 0) {
-        activeFilters.push({ 
-            type: 'Status', 
-            value: statusSelected.map(o => o.value).join(', '), 
-            clear: 'status' 
-        });
-    }
-    
-    // Organization filter
-    const orgSelected = Array.from(document.getElementById('organizationFilter').selectedOptions);
-    if (orgSelected.length > 0) {
-        activeFilters.push({ 
-            type: 'Organization', 
-            value: orgSelected.map(o => o.value).join(', '), 
-            clear: 'organization' 
-        });
-    }
-    
-    // Date range filter
-    const startDate = document.getElementById('dateRangeStart').value;
-    const endDate = document.getElementById('dateRangeEnd').value;
-    if (startDate || endDate) {
-        const dateField = document.getElementById('dateFieldSelect').value;
-        const dateValue = `${startDate || 'Start'} to ${endDate || 'End'}`;
-        activeFilters.push({ 
-            type: `${dateField} Range`, 
-            value: dateValue, 
-            clear: 'dateRange' 
-        });
-    }
-    
-    // Financial range filter
-    const minValue = document.getElementById('financialMin').value;
-    const maxValue = document.getElementById('financialMax').value;
-    if (minValue || maxValue) {
-        const financialField = document.getElementById('financialFieldSelect').value;
-        const financialValue = `$${minValue || '0'} to $${maxValue || '∞'}`;
-        activeFilters.push({ 
-            type: `${financialField} Range`, 
-            value: financialValue, 
-            clear: 'financialRange' 
-        });
-    }
-    
-    if (activeFilters.length > 0) {
-        activeFiltersList.innerHTML = activeFilters.map(filter => `
-            <div class="active-filter-tag">
-                <span><strong>${filter.type}:</strong> ${filter.value}</span>
-                <button class="remove-filter" data-clear="${filter.clear}">&times;</button>
-            </div>
-        `).join('');
-        
-        activeFiltersContainer.style.display = 'block';
-        
-        // Add event listeners to remove buttons
-        activeFiltersList.querySelectorAll('.remove-filter').forEach(btn => {
-            btn.addEventListener('click', function() {
-                clearSpecificFilter(this.getAttribute('data-clear'));
-            });
-        });
-    } else {
-        activeFiltersContainer.style.display = 'none';
-    }
-}
-
-/**
- * Clear specific filter
- */
-function clearSpecificFilter(filterType) {
-    switch (filterType) {
-        case 'search':
-            clearSearch();
-            break;
-        case 'status':
-            document.getElementById('statusFilter').selectedIndex = -1;
-            handleStatusFilter({ target: { selectedOptions: [] } });
-            break;
-        case 'organization':
-            document.getElementById('organizationFilter').selectedIndex = -1;
-            handleOrganizationFilter({ target: { selectedOptions: [] } });
-            break;
-        case 'dateRange':
-            document.getElementById('dateRangeStart').value = '';
-            document.getElementById('dateRangeEnd').value = '';
-            document.querySelectorAll('.date-preset-btn').forEach(btn => btn.classList.remove('active'));
-            handleDateRangeFilter();
-            break;
-        case 'financialRange':
-            document.getElementById('financialMin').value = '';
-            document.getElementById('financialMax').value = '';
-            document.querySelectorAll('.financial-preset-btn').forEach(btn => btn.classList.remove('active'));
-            handleFinancialRangeFilter();
-            break;
-    }
-}
-
-/**
- * Save current filters to localStorage
- */
-function saveCurrentFilters() {
-    const filters = {
-        search: document.getElementById('searchInput').value,
-        status: Array.from(document.getElementById('statusFilter').selectedOptions).map(o => o.value),
-        organization: Array.from(document.getElementById('organizationFilter').selectedOptions).map(o => o.value),
-        dateField: document.getElementById('dateFieldSelect').value,
-        dateStart: document.getElementById('dateRangeStart').value,
-        dateEnd: document.getElementById('dateRangeEnd').value,
-        financialField: document.getElementById('financialFieldSelect').value,
-        financialMin: document.getElementById('financialMin').value,
-        financialMax: document.getElementById('financialMax').value
-    };
-    
-    localStorage.setItem('dashboardFilters', JSON.stringify(filters));
-    showSuccess('Filters saved successfully');
-}
-
-/**
- * Set up modal event listeners
- */
-function setupModalEventListeners() {
-    // Close modals when clicking outside or on close button
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
+  }
+  
+  var clearAllActive = document.getElementById('clearAllActiveFilters');
+  if (clearAllActive) {
+    clearAllActive.addEventListener('click', function() {
+      document.getElementById('clearFiltersBtn').click();
     });
-    
-    document.querySelectorAll('.modal-close').forEach(closeBtn => {
-        closeBtn.addEventListener('click', function() {
-            closeBtn.closest('.modal').style.display = 'none';
-        });
+  }
+  
+  // Pagination
+  var prevBtn = document.getElementById('prevPageBtn');
+  var nextBtn = document.getElementById('nextPageBtn');
+  if (prevBtn) prevBtn.addEventListener('click', function() {
+    if (currentPage > 1) { currentPage--; renderTable(filteredData); }
+  });
+  if (nextBtn) nextBtn.addEventListener('click', function() {
+    var totalPages = Math.ceil(filteredData.length / tablePageSize);
+    if (currentPage < totalPages) { currentPage++; renderTable(filteredData); }
+  });
+  
+  // Page size
+  var pageSizeSel = document.getElementById('pageSizeSelect');
+  if (pageSizeSel) {
+    pageSizeSel.addEventListener('change', function() {
+      tablePageSize = parseInt(this.value) || 50;
+      currentPage = 1;
+      renderTable(filteredData);
     });
-}
-
-/**
- * Handle search filter input
- */
-function handleSearchFilter(event) {
-    const searchTerm = event.target.value;
-    filteredData = filterController.applyTextSearch(searchTerm);
-    updateDashboard();
-}
-
-/**
- * Handle status filter change
- */
-function handleStatusFilter(event) {
-    const selectedStatuses = Array.from(event.target.selectedOptions).map(option => option.value);
-    filteredData = filterController.applyMultiSelectFilter('status', selectedStatuses);
-    updateSelectedCount('statusCount', selectedStatuses.length);
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Handle organization filter change
- */
-function handleOrganizationFilter(event) {
-    const selectedOrgs = Array.from(event.target.selectedOptions).map(option => option.value);
-    filteredData = filterController.applyMultiSelectFilter('clientBureau', selectedOrgs);
-    updateSelectedCount('organizationCount', selectedOrgs.length);
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Handle date range filter change
- */
-function handleDateRangeFilter() {
-    const dateField = document.getElementById('dateFieldSelect').value;
-    const startDate = document.getElementById('dateRangeStart').value;
-    const endDate = document.getElementById('dateRangeEnd').value;
-    
-    if (startDate && endDate) {
-        filteredData = filterController.applyDateRangeFilter(new Date(startDate), new Date(endDate), dateField);
-    } else if (startDate || endDate) {
-        // Handle partial date ranges
-        const start = startDate ? new Date(startDate) : new Date('1900-01-01');
-        const end = endDate ? new Date(endDate) : new Date('2100-12-31');
-        filteredData = filterController.applyDateRangeFilter(start, end, dateField);
-    } else {
-        filteredData = [...contractData];
-    }
-    
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Clear all filters
- */
-function clearAllFilters() {
-    // Reset filter controls
-    document.getElementById('searchInput').value = '';
-    document.getElementById('clearSearchBtn').style.display = 'none';
-    document.getElementById('searchSuggestions').style.display = 'none';
-    document.getElementById('statusFilter').selectedIndex = -1;
-    document.getElementById('organizationFilter').selectedIndex = -1;
-    document.getElementById('contractTypeFilter').selectedIndex = -1;
-    document.getElementById('dateRangeStart').value = '';
-    document.getElementById('dateRangeEnd').value = '';
-    document.getElementById('financialMin').value = '';
-    document.getElementById('financialMax').value = '';
-    
-    // Clear preset selections
-    document.querySelectorAll('.date-preset-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.financial-preset-btn').forEach(btn => btn.classList.remove('active'));
-    
-    // Update selected counts
-    updateSelectedCount('statusCount', 0);
-    updateSelectedCount('organizationCount', 0);
-    updateSelectedCount('contractTypeCount', 0);
-    
-    // Reset filtered data
-    filterController.clearAllFilters();
-    filteredData = [...contractData];
-    updateDashboard();
-    updateActiveFilters();
-}
-
-/**
- * Listen for chart update events
- */
-function setupChartEventListeners() {
-    document.addEventListener('chartsUpdated', function(event) {
-        console.log('Charts updated with', event.detail.dataCount, 'contracts at', event.detail.timestamp);
-        
-        // Update any dependent UI elements
-        updateChartStatusIndicator(event.detail.dataCount);
+  }
+  
+  // Refresh
+  var refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', function() {
+      contractData = [];
+      filteredData = [];
+      currentPage = 1;
+      initializeDashboard();
     });
+  }
+  
+  // Export button (simple CSV)
+  var exportBtn = document.getElementById('exportBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', function() {
+      exportCSV(filteredData);
+    });
+  }
+  
+  var exportTableBtn = document.getElementById('exportTableBtn');
+  if (exportTableBtn) {
+    exportTableBtn.addEventListener('click', function() {
+      exportCSV(filteredData);
+    });
+  }
 }
 
-/**
- * Update chart status indicator
- * @param {number} dataCount - Number of contracts being displayed
- */
-function updateChartStatusIndicator(dataCount) {
-    // Add a subtle indicator showing chart update status
-    const indicator = document.getElementById('chartUpdateIndicator');
-    if (indicator) {
-        indicator.textContent = `Displaying ${dataCount} contracts`;
-        indicator.classList.add('updated');
-        setTimeout(() => indicator.classList.remove('updated'), 1000);
-    }
+// ---- Export ----
+function exportCSV(data) {
+  if (!data || data.length === 0) { alert('No data to export'); return; }
+  var keys = Object.keys(data[0]);
+  var csv = keys.join(',') + '\n';
+  for (var i = 0; i < data.length; i++) {
+    var row = keys.map(function(k) {
+      var v = String(data[i][k] || '').replace(/"/g, '""');
+      return '"' + v + '"';
+    });
+    csv += row.join(',') + '\n';
+  }
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'contracts_export.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
-/**
- * Enable auto-refresh for charts
- */
-function enableAutoRefresh() {
-    if (visualizationManager) {
-        visualizationManager.enableAutoRefresh(() => filteredData, 30000); // 30 seconds
-    }
+// ---- Loading / Error UI ----
+function showLoading(show, message) {
+  var overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.style.display = show ? 'flex' : 'none';
+  if (message) {
+    var txt = document.querySelector('.loading-text');
+    if (txt) txt.textContent = message;
+  }
 }
 
-/**
- * Disable auto-refresh for charts
- */
-function disableAutoRefresh() {
-    if (visualizationManager) {
-        visualizationManager.disableAutoRefresh();
-    }
-}
-
-/**
- * Handle page size change
- */
-function handlePageSizeChange(event) {
-    const pageSize = parseInt(event.target.value);
-    dataTableManager.updatePagination(1, pageSize);
-}
-
-/**
- * Refresh dashboard data
- */
-async function refreshDashboard() {
-    try {
-        showLoading(true);
-        await loadDashboardData();
-        showLoading(false);
-        showSuccess('Dashboard refreshed successfully');
-    } catch (error) {
-        console.error('Refresh error:', error);
-        showError('Failed to refresh dashboard: ' + error.message);
-        showLoading(false);
-    }
-}
-
-/**
- * Show export modal
- */
-function showExportModal() {
-    document.getElementById('exportModal').style.display = 'block';
-}
-
-/**
- * Close export modal
- */
-function closeExportModal() {
-    document.getElementById('exportModal').style.display = 'none';
-}
-
-/**
- * Perform data export with enhanced functionality
- */
-async function performExport() {
-    try {
-        const format = document.querySelector('input[name="exportFormat"]:checked').value;
-        const configSelect = document.getElementById('exportConfiguration');
-        const configuration = configSelect ? configSelect.value : 'detailed';
-        
-        showLoading(true);
-        
-        // Get chart images for PDF export
-        let chartImages = [];
-        if (format === 'pdf' && typeof visualizationManager !== 'undefined') {
-            try {
-                chartImages = visualizationManager.exportChartImages();
-            } catch (error) {
-                console.warn('Could not export chart images:', error);
-            }
-        }
-        
-        const result = await new Promise((resolve, reject) => {
-            google.script.run
-                .withSuccessHandler(resolve)
-                .withFailureHandler(reject)
-                .exportData(filteredData, format, filterController.activeFilters, { 
-                    configuration: configuration,
-                    charts: chartImages 
-                });
-        });
-        
-        // Handle export result
-        if (result.success) {
-            // Create download link
-            const downloadLink = document.createElement('a');
-            downloadLink.href = result.downloadUrl;
-            downloadLink.download = result.filename;
-            downloadLink.textContent = `Download ${result.filename}`;
-            downloadLink.style.display = 'none';
-            
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-            
-            showSuccess(`Export completed successfully! Downloaded ${result.filename} (${formatFileSize(result.size)})`);
-            
-            // Log export activity
-            console.log('Export completed:', {
-                format: result.format,
-                filename: result.filename,
-                recordCount: result.recordCount,
-                size: result.size
-            });
-        } else {
-            throw new Error(result.error || 'Export failed');
-        }
-        
-        closeExportModal();
-        showLoading(false);
-        
-    } catch (error) {
-        console.error('Export error:', error);
-        showError('Failed to export data: ' + error.message);
-        showLoading(false);
-    }
-}
-
-/**
- * Export table data with enhanced options
- */
-async function exportTableData() {
-    try {
-        if (!dataTableManager) {
-            throw new Error('Data table manager not available');
-        }
-        
-        showLoading(true);
-        
-        // Get current table data (filtered and sorted)
-        const tableData = dataTableManager.getCurrentData();
-        
-        const result = await new Promise((resolve, reject) => {
-            google.script.run
-                .withSuccessHandler(resolve)
-                .withFailureHandler(reject)
-                .exportData(tableData, 'csv', filterController.activeFilters, { 
-                    configuration: 'detailed' 
-                });
-        });
-        
-        if (result.success) {
-            // Create download link
-            const downloadLink = document.createElement('a');
-            downloadLink.href = result.downloadUrl;
-            downloadLink.download = result.filename;
-            downloadLink.click();
-            
-            showSuccess(`Table exported successfully! Downloaded ${result.filename}`);
-        } else {
-            throw new Error(result.error || 'Table export failed');
-        }
-        
-        showLoading(false);
-        
-    } catch (error) {
-        console.error('Table export error:', error);
-        showError('Failed to export table: ' + error.message);
-        showLoading(false);
-    }
-}
-
-/**
- * Load available export configurations
- */
-async function loadExportConfigurations() {
-    try {
-        const configurations = await new Promise((resolve, reject) => {
-            google.script.run
-                .withSuccessHandler(resolve)
-                .withFailureHandler(reject)
-                .getExportConfigurations();
-        });
-        
-        const configSelect = document.getElementById('exportConfiguration');
-        if (configSelect && configurations) {
-            configSelect.innerHTML = '';
-            configurations.forEach(config => {
-                const option = document.createElement('option');
-                option.value = config.key;
-                option.textContent = config.name;
-                option.title = config.description;
-                configSelect.appendChild(option);
-            });
-        }
-        
-    } catch (error) {
-        console.warn('Could not load export configurations:', error);
-    }
-}
-
-/**
- * Format file size for display
- */
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-/**
- * Enhanced export modal with configuration options
- */
-function showExportModal() {
-    // Load configurations when modal is opened
-    loadExportConfigurations();
-    
-    // Update filter summary
-    updateExportFilterSummary();
-    
-    document.getElementById('exportModal').style.display = 'block';
-}
-
-/**
- * Update the filter summary in the export modal
- */
-function updateExportFilterSummary() {
-    const summaryDiv = document.getElementById('exportFilterSummary');
-    if (!summaryDiv || !filterController) return;
-    
-    const activeFilters = filterController.activeFilters;
-    
-    if (!activeFilters || Object.keys(activeFilters).length === 0) {
-        summaryDiv.innerHTML = '<em>No filters applied - all data will be exported</em>';
-        return;
-    }
-    
-    const filterItems = [];
-    
-    // Text search
-    if (activeFilters.searchText) {
-        filterItems.push({
-            label: 'Search Text',
-            value: `"${activeFilters.searchText}"`
-        });
-    }
-    
-    // Date range
-    if (activeFilters.dateRange) {
-        const { startDate, endDate, field } = activeFilters.dateRange;
-        filterItems.push({
-            label: 'Date Range',
-            value: `${formatDate(startDate)} to ${formatDate(endDate)} (${field})`
-        });
-    }
-    
-    // Status filter
-    if (activeFilters.status && activeFilters.status.length > 0) {
-        filterItems.push({
-            label: 'Status',
-            value: activeFilters.status.join(', ')
-        });
-    }
-    
-    // Organizations
-    if (activeFilters.organizations && activeFilters.organizations.length > 0) {
-        filterItems.push({
-            label: 'Organizations',
-            value: activeFilters.organizations.join(', ')
-        });
-    }
-    
-    // Contract types
-    if (activeFilters.contractTypes && activeFilters.contractTypes.length > 0) {
-        filterItems.push({
-            label: 'Contract Types',
-            value: activeFilters.contractTypes.join(', ')
-        });
-    }
-    
-    // Financial range
-    if (activeFilters.financialRange) {
-        const { min, max, field } = activeFilters.financialRange;
-        filterItems.push({
-            label: 'Financial Range',
-            value: `${formatCurrency(min)} to ${formatCurrency(max)} (${field})`
-        });
-    }
-    
-    // Personnel filter
-    if (activeFilters.personnel && activeFilters.personnel.length > 0) {
-        filterItems.push({
-            label: 'Personnel',
-            value: activeFilters.personnel.join(', ')
-        });
-    }
-    
-    // Build HTML
-    if (filterItems.length === 0) {
-        summaryDiv.innerHTML = '<em>No filters applied - all data will be exported</em>';
-    } else {
-        const html = filterItems.map(item => `
-            <div class="filter-item">
-                <span class="filter-label">${item.label}:</span>
-                <span class="filter-value">${item.value}</span>
-            </div>
-        `).join('');
-        
-        summaryDiv.innerHTML = html;
-    }
-}
-
-/**
- * Format date for display
- */
-function formatDate(date) {
-    if (!date) return '';
-    if (typeof date === 'string') date = new Date(date);
-    return date.toLocaleDateString();
-}
-
-/**
- * Close export modal
- */
-function closeExportModal() {
-    document.getElementById('exportModal').style.display = 'none';
-}
-
-/**
- * Show/hide loading overlay
- */
-function showLoading(show) {
-    const overlay = document.getElementById('loadingOverlay');
-    if (overlay) {
-        overlay.style.display = show ? 'flex' : 'none';
-    }
-}
-
-/**
- * Show error message
- */
 function showError(message) {
-    document.getElementById('errorMessage').textContent = message;
-    document.getElementById('errorModal').style.display = 'block';
+  debugLog('ERROR: ' + message);
+  var errMsg = document.getElementById('errorMessage');
+  var errModal = document.getElementById('errorModal');
+  if (errMsg) errMsg.textContent = message;
+  if (errModal) errModal.style.display = 'block';
 }
 
-/**
- * Close error modal
- */
 function closeErrorModal() {
-    document.getElementById('errorModal').style.display = 'none';
-}
-
-/**
- * Show success message (simple alert for now)
- */
-function showSuccess(message) {
-    // Could be enhanced with a proper success modal/toast
-    alert(message);
-}
-
-/**
- * Financial formatting utilities
- * Provides consistent currency and number formatting throughout the interface
- */
-
-/**
- * Format currency value with locale support
- * @param {number} amount - Currency amount
- * @param {Object} options - Formatting options
- * @returns {string}
- */
-function formatCurrency(amount, options = {}) {
-    const defaults = {
-        currency: 'USD',
-        locale: 'en-US',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-        showSymbol: true,
-        compact: false
-    };
-    
-    const config = { ...defaults, ...options };
-    
-    if (typeof amount !== 'number' || isNaN(amount)) {
-        return config.showSymbol ? '$0' : '0';
-    }
-    
-    // Handle compact formatting for large numbers
-    if (config.compact && Math.abs(amount) >= 1000) {
-        return formatCompactCurrency(amount, config);
-    }
-    
-    try {
-        const formatter = new Intl.NumberFormat(config.locale, {
-            style: config.showSymbol ? 'currency' : 'decimal',
-            currency: config.currency,
-            minimumFractionDigits: config.minimumFractionDigits,
-            maximumFractionDigits: config.maximumFractionDigits
-        });
-        
-        return formatter.format(amount);
-    } catch (error) {
-        console.warn('Currency formatting error:', error);
-        return config.showSymbol ? `$${amount.toLocaleString()}` : amount.toLocaleString();
-    }
-}
-
-/**
- * Format currency in compact notation (e.g., $1.2M, $500K)
- * @param {number} amount - Currency amount
- * @param {Object} config - Configuration object
- * @returns {string}
- */
-function formatCompactCurrency(amount, config) {
-    const absAmount = Math.abs(amount);
-    const sign = amount < 0 ? '-' : '';
-    const symbol = config.showSymbol ? '$' : '';
-    
-    if (absAmount >= 1000000000) {
-        return `${sign}${symbol}${(absAmount / 1000000000).toFixed(1)}B`;
-    } else if (absAmount >= 1000000) {
-        return `${sign}${symbol}${(absAmount / 1000000).toFixed(1)}M`;
-    } else if (absAmount >= 1000) {
-        return `${sign}${symbol}${(absAmount / 1000).toFixed(1)}K`;
-    } else {
-        return formatCurrency(amount, { ...config, compact: false });
-    }
-}
-
-/**
- * Format percentage value
- * @param {number} value - Percentage value (0-100)
- * @param {Object} options - Formatting options
- * @returns {string}
- */
-function formatPercentage(value, options = {}) {
-    const defaults = {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 1,
-        locale: 'en-US'
-    };
-    
-    const config = { ...defaults, ...options };
-    
-    if (typeof value !== 'number' || isNaN(value)) {
-        return '0%';
-    }
-    
-    try {
-        const formatter = new Intl.NumberFormat(config.locale, {
-            style: 'percent',
-            minimumFractionDigits: config.minimumFractionDigits,
-            maximumFractionDigits: config.maximumFractionDigits
-        });
-        
-        return formatter.format(value / 100);
-    } catch (error) {
-        console.warn('Percentage formatting error:', error);
-        return `${value.toFixed(config.maximumFractionDigits)}%`;
-    }
-}
-
-/**
- * Format large numbers with appropriate units
- * @param {number} value - Numeric value
- * @param {Object} options - Formatting options
- * @returns {string}
- */
-function formatNumber(value, options = {}) {
-    const defaults = {
-        locale: 'en-US',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-        compact: false
-    };
-    
-    const config = { ...defaults, ...options };
-    
-    if (typeof value !== 'number' || isNaN(value)) {
-        return '0';
-    }
-    
-    if (config.compact && Math.abs(value) >= 1000) {
-        return formatCompactNumber(value, config);
-    }
-    
-    try {
-        const formatter = new Intl.NumberFormat(config.locale, {
-            minimumFractionDigits: config.minimumFractionDigits,
-            maximumFractionDigits: config.maximumFractionDigits
-        });
-        
-        return formatter.format(value);
-    } catch (error) {
-        console.warn('Number formatting error:', error);
-        return value.toLocaleString();
-    }
-}
-
-/**
- * Format number in compact notation
- * @param {number} value - Numeric value
- * @param {Object} config - Configuration object
- * @returns {string}
- */
-function formatCompactNumber(value, config) {
-    const absValue = Math.abs(value);
-    const sign = value < 0 ? '-' : '';
-    
-    if (absValue >= 1000000000) {
-        return `${sign}${(absValue / 1000000000).toFixed(1)}B`;
-    } else if (absValue >= 1000000) {
-        return `${sign}${(absValue / 1000000).toFixed(1)}M`;
-    } else if (absValue >= 1000) {
-        return `${sign}${(absValue / 1000).toFixed(1)}K`;
-    } else {
-        return formatNumber(value, { ...config, compact: false });
-    }
-}
-
-/**
- * Parse currency string to number
- * @param {string} currencyString - Currency string (e.g., "$1,234.56")
- * @returns {number}
- */
-function parseCurrency(currencyString) {
-    if (typeof currencyString === 'number') {
-        return currencyString;
-    }
-    
-    if (!currencyString || typeof currencyString !== 'string') {
-        return 0;
-    }
-    
-    // Remove currency symbols, commas, and spaces
-    const cleanString = currencyString
-        .replace(/[$,\s]/g, '')
-        .replace(/[^\d.-]/g, '');
-    
-    const parsed = parseFloat(cleanString);
-    return isNaN(parsed) ? 0 : parsed;
-}
-
-/**
- * Format financial summary for display
- * @param {Object} summary - Financial summary object
- * @returns {Object}
- */
-function formatFinancialSummary(summary) {
-    return {
-        totalValue: formatCurrency(summary.totalValue, { compact: true }),
-        totalCeiling: formatCurrency(summary.totalCeiling, { compact: true }),
-        activeValue: formatCurrency(summary.activeValue, { compact: true }),
-        completedValue: formatCurrency(summary.completedValue, { compact: true }),
-        averageValue: formatCurrency(summary.averageValue, { compact: true }),
-        budgetUtilization: formatPercentage(summary.budgetUtilization),
-        remainingBudget: formatCurrency(summary.remainingBudget, { compact: true })
-    };
-}
-
-/**
- * Get appropriate currency formatting based on amount size
- * @param {number} amount - Currency amount
- * @returns {Object} - Formatting configuration
- */
-function getCurrencyFormatConfig(amount) {
-    const absAmount = Math.abs(amount);
-    
-    if (absAmount >= 1000000) {
-        return { compact: true, maximumFractionDigits: 1 };
-    } else if (absAmount >= 1000) {
-        return { compact: true, maximumFractionDigits: 0 };
-    } else if (absAmount >= 1) {
-        return { compact: false, maximumFractionDigits: 0 };
-    } else {
-        return { compact: false, maximumFractionDigits: 2 };
-    }
-}
-
-/**
- * Format currency for different contexts
- */
-const CurrencyFormatter = {
-    // For summary cards (compact format)
-    summary: (amount) => formatCurrency(amount, { compact: true }),
-    
-    // For data tables (full format with commas)
-    table: (amount) => formatCurrency(amount, { compact: false }),
-    
-    // For charts (compact format)
-    chart: (amount) => formatCurrency(amount, { compact: true, maximumFractionDigits: 1 }),
-    
-    // For tooltips (full format with cents if needed)
-    tooltip: (amount) => {
-        const config = getCurrencyFormatConfig(amount);
-        return formatCurrency(amount, { ...config, compact: false });
-    },
-    
-    // For exports (numeric format without symbols)
-    export: (amount) => formatCurrency(amount, { showSymbol: false, compact: false }),
-    
-    // For input fields (no formatting, just validation)
-    input: (amount) => {
-        if (typeof amount === 'number' && !isNaN(amount)) {
-            return amount.toString();
-        }
-        return '';
-    }
-};
-
-/**
- * Locale-aware formatting utilities
- */
-const LocaleFormatter = {
-    /**
-     * Get user's preferred locale
-     */
-    getLocale: () => {
-        return navigator.language || navigator.userLanguage || 'en-US';
-    },
-    
-    /**
-     * Get currency for locale
-     */
-    getCurrency: (locale = null) => {
-        const userLocale = locale || LocaleFormatter.getLocale();
-        
-        // Simple mapping for common locales
-        const currencyMap = {
-            'en-US': 'USD',
-            'en-GB': 'GBP',
-            'en-CA': 'CAD',
-            'en-AU': 'AUD',
-            'fr-FR': 'EUR',
-            'de-DE': 'EUR',
-            'es-ES': 'EUR',
-            'ja-JP': 'JPY',
-            'zh-CN': 'CNY'
-        };
-        
-        return currencyMap[userLocale] || 'USD';
-    },
-    
-    /**
-     * Format currency with user's locale
-     */
-    formatCurrency: (amount, options = {}) => {
-        const locale = LocaleFormatter.getLocale();
-        const currency = LocaleFormatter.getCurrency(locale);
-        
-        return formatCurrency(amount, {
-            locale,
-            currency,
-            ...options
-        });
-    }
-};
-
-// Export for use in other parts of the application
-window.CurrencyFormatter = CurrencyFormatter;
-window.LocaleFormatter = LocaleFormatter;
-window.formatCurrency = formatCurrency;
-window.formatPercentage = formatPercentage;
-window.formatNumber = formatNumber;
-window.parseCurrency = parseCurrency;
-
-/**
- * Debounce function for search input
- */
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-/**
- * Simple client-side implementations of controller classes
- * These will be enhanced in subsequent tasks
- */
-
-class VisualizationManager {
-    constructor() {
-        this.charts = {};
-        this.chartInstances = {};
-    }
-    
-    initializeCharts(data) {
-        // Initialize basic charts
-        console.log('Initializing charts with', data.length, 'contracts');
-    }
-    
-    updateCharts(data) {
-        // Update charts with new data
-        console.log('Updating charts with', data.length, 'contracts');
-    }
-    
-    exportChartImages() {
-        // Export chart images for PDF
-        return [];
-    }
-    
-    enableAutoRefresh(dataProvider, interval) {
-        // Enable auto-refresh
-        console.log('Auto-refresh enabled');
-    }
-    
-    disableAutoRefresh() {
-        // Disable auto-refresh
-        console.log('Auto-refresh disabled');
-    }
-}
-
-class DashboardController {
-    constructor() {
-        this.isInitialized = false;
-    }
-    
-    initialize() {
-        this.isInitialized = true;
-    }
-}
-
-class FilterController {
-    constructor() {
-        this.originalData = [];
-        this.filteredData = [];
-        this.activeFilters = {};
-    }
-    
-    initializeFilters(data) {
-        this.originalData = data;
-        this.filteredData = [...data];
-    }
-    
-    applyTextSearch(searchTerm) {
-        if (!searchTerm) return [...this.originalData];
-        
-        const term = searchTerm.toLowerCase();
-        return this.originalData.filter(contract => {
-            return (contract.AWARD && String(contract.AWARD).toLowerCase().includes(term)) ||
-                   (contract.PROJECT && String(contract.PROJECT).toLowerCase().includes(term)) ||
-                   (contract.PROJECT_TITLE && String(contract.PROJECT_TITLE).toLowerCase().includes(term)) ||
-                   (contract.SOLICITATION && String(contract.SOLICITATION).toLowerCase().includes(term)) ||
-                   (contract.Client_Bureau && String(contract.Client_Bureau).toLowerCase().includes(term)) ||
-                   (contract.client_organization && String(contract.client_organization).toLowerCase().includes(term)) ||
-                   (contract.AWARD_STATUS && String(contract.AWARD_STATUS).toLowerCase().includes(term));
-        });
-    }
-    
-    applyMultiSelectFilter(field, values) {
-        if (!values || values.length === 0) return [...this.originalData];
-        
-        return this.originalData.filter(contract => {
-            return values.includes(contract[field]);
-        });
-    }
-    
-    applyDateRangeFilter(startDate, endDate, field = 'awardDate') {
-        return this.originalData.filter(contract => {
-            const contractDate = new Date(contract[field]);
-            if (isNaN(contractDate.getTime())) return false;
-            return contractDate >= startDate && contractDate <= endDate;
-        });
-    }
-    
-    applyFinancialRangeFilter(field, min, max) {
-        return this.originalData.filter(contract => {
-            const value = contract[field] || 0;
-            return value >= min && value <= max;
-        });
-    }
-    
-    clearAllFilters() {
-        this.activeFilters = {};
-        this.filteredData = [...this.originalData];
-    }
-}
-
-class DataTableManager {
-    constructor() {
-        this.currentData = [];
-        this.currentPage = 1;
-        this.pageSize = 50;
-        
-        // Use the full implementation from the controller file
-        // This is a simplified version for the HTML template
-    }
-    
-    renderTable(data) {
-        this.currentData = data;
-        
-        // Simple table rendering for now
-        const tbody = document.querySelector('#contractsTable tbody');
-        if (!tbody) return;
-        
-        tbody.innerHTML = '';
-        
-        if (data.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" class="no-data">
-                        No contracts found matching the current filters.
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-        
-        // Render first 50 rows for now
-        const displayData = data.slice(0, this.pageSize);
-        
-        displayData.forEach((contract, index) => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${contract.AWARD || '—'}</td>
-                <td>${contract.PROJECT || contract.PROJECT_TITLE || '—'}</td>
-                <td>${this.formatCurrency(parseFloat(contract.CEILING) || 0)}</td>
-                <td>${this.formatCurrency(parseFloat(contract.CEILING) || 0)}</td>
-                <td><span class="status-badge ${this.getStatusClass(contract.AWARD_STATUS)}">${contract.AWARD_STATUS || '—'}</span></td>
-                <td>${this.formatDate(contract.PROJECT_START)}</td>
-                <td>${this.formatDate(contract.PROJECT_END)}</td>
-                <td>${contract.Client_Bureau || contract.client_organization || '—'}</td>
-            `;
-            tbody.appendChild(row);
-        });
-        
-        // Update pagination info
-        const info = document.getElementById('paginationInfo');
-        if (info) {
-            info.textContent = `Showing ${Math.min(data.length, this.pageSize)} of ${data.length} contracts`;
-        }
-    }
-    
-    formatCurrency(amount) {
-        return CurrencyFormatter.table(amount);
-    }
-    
-    formatDate(date) {
-        if (!date) return '—';
-        try {
-            return new Date(date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        } catch {
-            return '—';
-        }
-    }
-    
-    getStatusClass(status) {
-        if (!status) return 'status-default';
-        const statusLower = status.toLowerCase();
-        if (statusLower.includes('active')) return 'status-active';
-        if (statusLower.includes('completed')) return 'status-completed';
-        if (statusLower.includes('pending')) return 'status-pending';
-        if (statusLower.includes('cancelled')) return 'status-cancelled';
-        if (statusLower.includes('hold')) return 'status-hold';
-        return 'status-default';
-    }
-    
-    updatePagination(page, pageSize) {
-        this.currentPage = page;
-        this.pageSize = pageSize;
-        this.renderTable(this.currentData);
-    }
-    
-    exportTableData(format) {
-        console.log('Exporting table data in', format, 'format');
-        // Basic export functionality
-        if (format === 'csv') {
-            const headers = ['Award #', 'Project', 'Award Value', 'Ceiling', 'Status', 'Start Date', 'End Date', 'Organization'];
-            const rows = this.currentData.map(contract => [
-                contract.award || '',
-                contract.project || '',
-                contract.awardValue || 0,
-                contract.ceiling || 0,
-                contract.status || '',
-                contract.projectStart || '',
-                contract.projectEnd || '',
-                contract.clientBureau || ''
-            ]);
-            
-            const csvContent = [headers, ...rows]
-                .map(row => row.map(cell => `"${cell}"`).join(','))
-                .join('\n');
-            
-            const blob = new Blob([csvContent], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'contracts.csv';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        }
-    }
+  var m = document.getElementById('errorModal');
+  if (m) m.style.display = 'none';
 }
 </script>

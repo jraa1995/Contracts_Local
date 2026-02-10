@@ -356,196 +356,156 @@ function include(filename) {
 }
 
 /**
- * Enhanced API endpoint to get contract data with comprehensive error handling
- * @returns {ContractData[]} Array of contract data
+ * Get total number of contract rows and column info.
+ * Called by client first to know how many pages to fetch.
  */
-/**
- * Test function to verify AL_Extract sheet and data
- * Run this in Google Apps Script to diagnose issues
- */
-function testALExtractSheet() {
-  console.log('=== Testing AL_Extract Sheet ===');
-  
+function getContractInfo() {
   try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    console.log('Spreadsheet:', spreadsheet.getName());
-    console.log('Spreadsheet ID:', spreadsheet.getId());
-    
-    const allSheets = spreadsheet.getSheets();
-    console.log('Available sheets:', allSheets.map(s => s.getName()).join(', '));
-    
-    const sheet = spreadsheet.getSheetByName('AL_Extract');
-    if (!sheet) {
-      return {
-        success: false,
-        error: 'AL_Extract sheet not found',
-        availableSheets: allSheets.map(s => s.getName())
-      };
-    }
-    
-    console.log('Found AL_Extract sheet');
-    
-    const range = sheet.getDataRange();
-    const values = range.getValues();
-    
-    console.log('Total rows:', values.length);
-    
-    if (values.length > 0) {
-      console.log('Headers:', values[0].join(', '));
-    }
-    
-    if (values.length > 1) {
-      console.log('First data row:', values[1].join(', '));
-    }
-    
-    return {
-      success: true,
-      sheetName: sheet.getName(),
-      rowCount: values.length,
-      headers: values[0],
-      sampleRow: values.length > 1 ? values[1] : null
-    };
-    
-  } catch (error) {
-    console.error('Error:', error.message);
-    return {
-      success: false,
-      error: error.message,
-      stack: error.stack
-    };
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AL_Extract');
+    if (!sheet) return { success: false, error: 'AL_Extract sheet not found' };
+    var lastRow = sheet.getLastRow();
+    // Row 1 = numbers, Row 2 = headers, Row 3+ = data
+    var dataRows = Math.max(0, lastRow - 2);
+    return { success: true, totalRows: dataRows };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 }
 
 /**
- * Load contract data with chunked caching for large datasets
- * Only sends essential columns to keep payload small
- * @returns {ContractData[]} Array of contract data
+ * Get a page of contract data. 
+ * @param {number} page - 0-based page index
+ * @param {number} pageSize - rows per page (default 500)
+ * @returns {Object} { success, data, page, totalPages }
  */
-function getContractData() {
+function getContractPage(page, pageSize) {
   try {
-    console.log('getContractData called');
+    page = page || 0;
+    pageSize = pageSize || 500;
     
-    // Essential columns to send to client (keeps payload manageable)
-    var essentialColumns = [
-      'AWARD_STATUS', 'APEXNAME', 'EMP_ORG_SHORT_NAME', 
-      'AWARD_TITLE', 'SOLICITATION', 'AWARD', 'PROJECT',
-      'Day of AWARD_DATE_CO', 'CONTRACT_TYPE', 'CEILING',
-      'PM', 'CO', 'CS', 'PROJECT_TITLE',
-      'PROJECT_START', 'PROJECT_END', 'INSTRUMENT',
-      'Client_Bureau', 'client_organization', 'AWARD',
-      'PROJECT_CLIENT', 'FLAGS', 'Mod_Status',
-      'REFERENCED_IDV_NUMBER', 'FIN', 'IA'
+    var cacheKey = 'cp_' + page + '_' + pageSize;
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+    
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AL_Extract');
+    if (!sheet) return { success: false, error: 'AL_Extract sheet not found' };
+    
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    var totalDataRows = Math.max(0, lastRow - 2);
+    var totalPages = Math.ceil(totalDataRows / pageSize);
+    
+    if (page >= totalPages) {
+      return { success: true, data: [], page: page, totalPages: totalPages };
+    }
+    
+    // Read headers from row 2
+    var headers = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+    
+    // Essential columns only
+    var want = [
+      'AWARD_STATUS', 'APEXNAME', 'EMP_ORG_SHORT_NAME',
+      'AWARD_TITLE', 'AWARD', 'PROJECT', 'CONTRACT_TYPE',
+      'CEILING', 'PM', 'CO', 'CS', 'PROJECT_TITLE',
+      'PROJECT_START', 'PROJECT_END', 'Client_Bureau',
+      'client_organization', 'FLAGS', 'Mod_Status'
     ];
     
-    // Try cache first
-    var cache = CacheService.getScriptCache();
-    var chunkCountStr = cache.get('cd_chunks');
-    
-    if (chunkCountStr) {
-      var chunkCount = parseInt(chunkCountStr);
-      console.log('Loading from cache, chunks: ' + chunkCount);
-      var keys = [];
-      for (var i = 0; i < chunkCount; i++) {
-        keys.push('cd_' + i);
-      }
-      var chunks = cache.getAll(keys);
-      var allData = [];
-      for (var i = 0; i < chunkCount; i++) {
-        var chunk = chunks['cd_' + i];
-        if (chunk) {
-          allData = allData.concat(JSON.parse(chunk));
-        }
-      }
-      if (allData.length > 0) {
-        console.log('Returned ' + allData.length + ' cached contracts');
-        return allData;
-      }
-    }
-    
-    console.log('Loading fresh data from AL_Extract sheet');
-    
-    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = spreadsheet.getSheetByName('AL_Extract');
-    
-    if (!sheet) {
-      throw new Error('AL_Extract sheet not found');
-    }
-    
-    var range = sheet.getDataRange();
-    var values = range.getValues();
-    
-    console.log('Read ' + values.length + ' rows');
-    
-    if (values.length <= 2) {
-      return [];
-    }
-    
-    // Row 2 = actual headers (index 1), Row 3+ = data (index 2+)
-    var headers = values[1];
-    
-    // Build column index map for essential columns only
-    var columnMap = {};
+    var colMap = {};
     for (var j = 0; j < headers.length; j++) {
       var h = String(headers[j]).trim();
-      if (essentialColumns.indexOf(h) !== -1) {
-        columnMap[h] = j;
+      if (want.indexOf(h) !== -1) {
+        colMap[h] = j;
       }
     }
     
-    console.log('Mapped columns: ' + Object.keys(columnMap).join(', '));
+    // Calculate which rows to read (data starts at row 3)
+    var startRow = 3 + (page * pageSize);
+    var numRows = Math.min(pageSize, lastRow - startRow + 1);
     
+    if (numRows <= 0) {
+      return { success: true, data: [], page: page, totalPages: totalPages };
+    }
+    
+    var values = sheet.getRange(startRow, 1, numRows, lastCol).getValues();
+    var tz = Session.getScriptTimeZone();
     var data = [];
     
-    for (var i = 2; i < values.length; i++) {
+    for (var i = 0; i < values.length; i++) {
       var row = values[i];
-      
-      // Skip empty rows
       if (!row[1] && !row[2]) continue;
       
       var contract = {};
-      
-      for (var colName in columnMap) {
-        var colIdx = columnMap[colName];
-        var value = row[colIdx];
-        
-        if (value instanceof Date) {
-          contract[colName] = Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-        } else if (value === '' || value === null || value === undefined) {
+      for (var colName in colMap) {
+        var val = row[colMap[colName]];
+        if (val instanceof Date) {
+          contract[colName] = Utilities.formatDate(val, tz, 'yyyy-MM-dd');
+        } else if (val === '' || val === null || val === undefined) {
           contract[colName] = '';
         } else {
-          contract[colName] = value;
+          contract[colName] = val;
         }
       }
-      
       data.push(contract);
     }
     
-    console.log('Converted ' + data.length + ' contracts with ' + Object.keys(columnMap).length + ' columns each');
+    var result = { success: true, data: data, page: page, totalPages: totalPages };
     
-    // Cache in chunks
+    // Cache this page (each page ~500 rows should be well under 100KB)
     try {
-      var chunkSize = 500;
-      var totalChunks = Math.ceil(data.length / chunkSize);
-      var cacheEntries = {};
-      
-      for (var i = 0; i < totalChunks; i++) {
-        var chunk = data.slice(i * chunkSize, (i + 1) * chunkSize);
-        cacheEntries['cd_' + i] = JSON.stringify(chunk);
-      }
-      
-      cache.putAll(cacheEntries, 300);
-      cache.put('cd_chunks', String(totalChunks), 300);
-      console.log('Cached in ' + totalChunks + ' chunks');
-    } catch (cacheError) {
-      console.warn('Cache failed:', cacheError.message);
+      cache.put(cacheKey, JSON.stringify(result), 300);
+    } catch (ce) {
+      // Cache failure is non-fatal
     }
     
-    return data;
+    return result;
     
   } catch (error) {
-    console.error('Error in getContractData:', error);
-    console.error('Stack:', error.stack);
-    return [];
+    return { success: false, error: error.message, page: page };
+  }
+}
+
+/**
+ * Quick test: returns 5 rows to verify the pipeline works end-to-end.
+ */
+function getContractDataTest() {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AL_Extract');
+    if (!sheet) return { success: false, error: 'AL_Extract sheet not found' };
+    
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+    var rows = sheet.getRange(3, 1, 5, lastCol).getValues();
+    var tz = Session.getScriptTimeZone();
+    
+    var want = ['AWARD_STATUS', 'AWARD', 'PROJECT', 'CEILING', 'PROJECT_TITLE',
+                'PROJECT_START', 'PROJECT_END', 'Client_Bureau', 'CONTRACT_TYPE'];
+    var colMap = {};
+    for (var j = 0; j < headers.length; j++) {
+      var h = String(headers[j]).trim();
+      if (want.indexOf(h) !== -1) colMap[h] = j;
+    }
+    
+    var data = [];
+    for (var i = 0; i < rows.length; i++) {
+      var contract = {};
+      for (var colName in colMap) {
+        var val = rows[i][colMap[colName]];
+        if (val instanceof Date) {
+          contract[colName] = Utilities.formatDate(val, tz, 'yyyy-MM-dd');
+        } else {
+          contract[colName] = (val === '' || val === null || val === undefined) ? '' : val;
+        }
+      }
+      data.push(contract);
+    }
+    
+    return { success: true, count: data.length, data: data, columns: Object.keys(colMap) };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 }
 /**
