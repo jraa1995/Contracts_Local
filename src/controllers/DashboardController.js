@@ -1117,30 +1117,33 @@ let dashboardController;
 
 /**
  * Initialize dashboard when DOM is ready
+ * This code only runs in the browser (client-side)
  */
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    dashboardController = new DashboardController();
-    await dashboardController.initialize();
-  } catch (error) {
-    console.error('Failed to initialize dashboard:', error);
-    // Show fallback error UI
-    document.body.innerHTML = `
-      <div class="error-container">
-        <h1>Dashboard Initialization Failed</h1>
-        <p>Unable to load the contract management dashboard.</p>
-        <p>Error: ${error.message}</p>
-        <button onclick="location.reload()">Retry</button>
-      </div>
-    `;
-  }
-});
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      dashboardController = new DashboardController();
+      await dashboardController.initialize();
+    } catch (error) {
+      console.error('Failed to initialize dashboard:', error);
+      // Show fallback error UI
+      document.body.innerHTML = `
+        <div class="error-container">
+          <h1>Dashboard Initialization Failed</h1>
+          <p>Unable to load the contract management dashboard.</p>
+          <p>Error: ${error.message}</p>
+          <button onclick="location.reload()">Retry</button>
+        </div>
+      `;
+    }
+  });
 
-/**
- * Handle page unload cleanup
- */
-window.addEventListener('beforeunload', () => {
-  if (dashboardController) {
-    dashboardController.cleanup();
-  }
-});
+  /**
+   * Handle page unload cleanup
+   */
+  window.addEventListener('beforeunload', () => {
+    if (dashboardController) {
+      dashboardController.cleanup();
+    }
+  });
+}
