@@ -418,27 +418,40 @@ function testALExtractSheet() {
 
 /**
  * Load contract data with chunked caching for large datasets
+ * Only sends essential columns to keep payload small
  * @returns {ContractData[]} Array of contract data
  */
 function getContractData() {
   try {
     console.log('getContractData called');
     
+    // Essential columns to send to client (keeps payload manageable)
+    var essentialColumns = [
+      'AWARD_STATUS', 'APEXNAME', 'EMP_ORG_SHORT_NAME', 
+      'AWARD_TITLE', 'SOLICITATION', 'AWARD', 'PROJECT',
+      'Day of AWARD_DATE_CO', 'CONTRACT_TYPE', 'CEILING',
+      'PM', 'CO', 'CS', 'PROJECT_TITLE',
+      'PROJECT_START', 'PROJECT_END', 'INSTRUMENT',
+      'Client_Bureau', 'client_organization', 'AWARD',
+      'PROJECT_CLIENT', 'FLAGS', 'Mod_Status',
+      'REFERENCED_IDV_NUMBER', 'FIN', 'IA'
+    ];
+    
     // Try cache first
-    const cache = CacheService.getScriptCache();
-    const chunkCountStr = cache.get('contractData_chunks');
+    var cache = CacheService.getScriptCache();
+    var chunkCountStr = cache.get('cd_chunks');
     
     if (chunkCountStr) {
-      const chunkCount = parseInt(chunkCountStr);
+      var chunkCount = parseInt(chunkCountStr);
       console.log('Loading from cache, chunks: ' + chunkCount);
-      const keys = [];
-      for (let i = 0; i < chunkCount; i++) {
-        keys.push('contractData_' + i);
+      var keys = [];
+      for (var i = 0; i < chunkCount; i++) {
+        keys.push('cd_' + i);
       }
-      const chunks = cache.getAll(keys);
-      let allData = [];
-      for (let i = 0; i < chunkCount; i++) {
-        const chunk = chunks['contractData_' + i];
+      var chunks = cache.getAll(keys);
+      var allData = [];
+      for (var i = 0; i < chunkCount; i++) {
+        var chunk = chunks['cd_' + i];
         if (chunk) {
           allData = allData.concat(JSON.parse(chunk));
         }
@@ -451,16 +464,15 @@ function getContractData() {
     
     console.log('Loading fresh data from AL_Extract sheet');
     
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = spreadsheet.getSheetByName('AL_Extract');
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = spreadsheet.getSheetByName('AL_Extract');
     
     if (!sheet) {
-      const availableSheets = spreadsheet.getSheets().map(s => s.getName()).join(', ');
-      throw new Error('AL_Extract sheet not found. Available: ' + availableSheets);
+      throw new Error('AL_Extract sheet not found');
     }
     
-    const range = sheet.getDataRange();
-    const values = range.getValues();
+    var range = sheet.getDataRange();
+    var values = range.getValues();
     
     console.log('Read ' + values.length + ' rows');
     
@@ -468,60 +480,71 @@ function getContractData() {
       return [];
     }
     
-    // Row 1 = column numbers (skip), Row 2 = actual headers, Row 3+ = data
-    const headers = values[1];
-    console.log('Headers (row 2): ' + headers.slice(0, 10).join(', ') + '...');
+    // Row 2 = actual headers (index 1), Row 3+ = data (index 2+)
+    var headers = values[1];
     
-    const data = [];
+    // Build column index map for essential columns only
+    var columnMap = {};
+    for (var j = 0; j < headers.length; j++) {
+      var h = String(headers[j]).trim();
+      if (essentialColumns.indexOf(h) !== -1) {
+        columnMap[h] = j;
+      }
+    }
     
-    for (let i = 2; i < values.length; i++) {
-      const row = values[i];
+    console.log('Mapped columns: ' + Object.keys(columnMap).join(', '));
+    
+    var data = [];
+    
+    for (var i = 2; i < values.length; i++) {
+      var row = values[i];
       
       // Skip empty rows
-      if (!row[0] && !row[1] && !row[2]) continue;
+      if (!row[1] && !row[2]) continue;
       
-      const contract = {};
+      var contract = {};
       
-      for (let j = 0; j < headers.length; j++) {
-        const header = String(headers[j]).trim();
-        if (!header) continue;
-        
-        const value = row[j];
+      for (var colName in columnMap) {
+        var colIdx = columnMap[colName];
+        var value = row[colIdx];
         
         if (value instanceof Date) {
-          contract[header] = value.toISOString();
+          contract[colName] = Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        } else if (value === '' || value === null || value === undefined) {
+          contract[colName] = '';
         } else {
-          contract[header] = value;
+          contract[colName] = value;
         }
       }
       
       data.push(contract);
     }
     
-    console.log('Converted ' + data.length + ' contracts');
+    console.log('Converted ' + data.length + ' contracts with ' + Object.keys(columnMap).length + ' columns each');
     
-    // Cache in chunks (CacheService limit is 100KB per key)
+    // Cache in chunks
     try {
-      const chunkSize = 200;
-      const totalChunks = Math.ceil(data.length / chunkSize);
-      const cacheEntries = {};
+      var chunkSize = 500;
+      var totalChunks = Math.ceil(data.length / chunkSize);
+      var cacheEntries = {};
       
-      for (let i = 0; i < totalChunks; i++) {
-        const chunk = data.slice(i * chunkSize, (i + 1) * chunkSize);
-        cacheEntries['contractData_' + i] = JSON.stringify(chunk);
+      for (var i = 0; i < totalChunks; i++) {
+        var chunk = data.slice(i * chunkSize, (i + 1) * chunkSize);
+        cacheEntries['cd_' + i] = JSON.stringify(chunk);
       }
       
       cache.putAll(cacheEntries, 300);
-      cache.put('contractData_chunks', String(totalChunks), 300);
+      cache.put('cd_chunks', String(totalChunks), 300);
       console.log('Cached in ' + totalChunks + ' chunks');
     } catch (cacheError) {
-      console.warn('Cache failed, continuing without cache:', cacheError.message);
+      console.warn('Cache failed:', cacheError.message);
     }
     
     return data;
     
   } catch (error) {
     console.error('Error in getContractData:', error);
+    console.error('Stack:', error.stack);
     return [];
   }
 }
