@@ -360,32 +360,55 @@ function include(filename) {
  * @returns {ContractData[]} Array of contract data
  */
 /**
- * Simple, fast data loading from AL_Extract sheet
+ * Load contract data with caching for performance
  * @returns {ContractData[]} Array of contract data
  */
 function getContractData() {
   try {
-    console.log('Loading data from AL_Extract sheet...');
+    console.log('getContractData called');
+    
+    // Try cache first (5 minute cache)
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'contractData_AL_Extract';
+    const cached = cache.get(cacheKey);
+    
+    if (cached) {
+      console.log('Returning cached data');
+      const data = JSON.parse(cached);
+      console.log(`Cached data: ${data.length} contracts`);
+      return data;
+    }
+    
+    console.log('Loading fresh data from AL_Extract sheet');
     
     // Get the active spreadsheet
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    console.log('Got spreadsheet:', spreadsheet.getName());
+    
     const sheet = spreadsheet.getSheetByName('AL_Extract');
     
     if (!sheet) {
-      throw new Error('AL_Extract sheet not found');
+      const availableSheets = spreadsheet.getSheets().map(s => s.getName()).join(', ');
+      throw new Error(`AL_Extract sheet not found. Available sheets: ${availableSheets}`);
     }
+    
+    console.log('Found AL_Extract sheet');
     
     // Get all data
     const range = sheet.getDataRange();
     const values = range.getValues();
     
+    console.log(`Read ${values.length} rows from sheet`);
+    
     if (values.length <= 1) {
-      console.log('No data found in AL_Extract sheet');
+      console.log('No data rows found (only headers or empty)');
       return [];
     }
     
     // First row is headers
     const headers = values[0];
+    console.log('Headers:', headers.join(', '));
+    
     const data = [];
     
     // Convert rows to objects
@@ -395,18 +418,37 @@ function getContractData() {
       
       for (let j = 0; j < headers.length; j++) {
         const header = headers[j];
-        contract[header] = row[j];
+        const value = row[j];
+        
+        // Convert dates if needed
+        if (value instanceof Date) {
+          contract[header] = value.toISOString();
+        } else {
+          contract[header] = value;
+        }
       }
       
       data.push(contract);
     }
     
-    console.log(`Loaded ${data.length} contracts from AL_Extract`);
+    console.log(`Converted ${data.length} contracts`);
+    
+    // Cache for 5 minutes
+    try {
+      cache.put(cacheKey, JSON.stringify(data), 300);
+      console.log('Data cached successfully');
+    } catch (cacheError) {
+      console.warn('Failed to cache data:', cacheError.message);
+    }
+    
     return data;
     
   } catch (error) {
-    console.error('Error loading contract data:', error);
-    throw new Error('Failed to load contract data: ' + error.message);
+    console.error('Error in getContractData:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Return empty array instead of throwing to prevent UI from breaking
+    return [];
   }
 }
 

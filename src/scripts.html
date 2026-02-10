@@ -59,12 +59,21 @@ async function loadDashboardData() {
         
         // Call Google Apps Script function
         const data = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Request timed out after 30 seconds'));
+            }, 30000);
+            
             google.script.run
                 .withSuccessHandler((result) => {
+                    clearTimeout(timeout);
                     console.log('Data loaded successfully:', result ? result.length : 0, 'records');
+                    if (!result || result.length === 0) {
+                        console.warn('No data returned from server');
+                    }
                     resolve(result);
                 })
                 .withFailureHandler((error) => {
+                    clearTimeout(timeout);
                     console.error('Google Apps Script error:', error);
                     reject(error);
                 })
@@ -74,6 +83,11 @@ async function loadDashboardData() {
         console.log('Processing loaded data...');
         contractData = data || [];
         filteredData = [...contractData];
+        
+        if (contractData.length === 0) {
+            showError('No contract data found in AL_Extract sheet. Please check that the sheet exists and contains data.');
+            return;
+        }
         
         console.log('Initializing components with', contractData.length, 'contracts');
         
@@ -91,7 +105,8 @@ async function loadDashboardData() {
     } catch (error) {
         console.error('Error loading data:', error);
         console.error('Error details:', error.message, error.stack);
-        throw new Error('Failed to load contract data: ' + error.message);
+        showError('Failed to load contract data: ' + error.message);
+        throw error;
     }
 }
 
