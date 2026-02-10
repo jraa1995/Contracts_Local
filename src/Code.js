@@ -395,8 +395,11 @@ function getContractData() {
   const requestStart = new Date();
   
   try {
+    console.log('getContractData: Starting...');
+    
     // Ensure application is initialized
     if (!appState.initialized) {
+      console.log('getContractData: Initializing application...');
       initializeApplication();
     }
     
@@ -405,6 +408,8 @@ function getContractData() {
       throw new Error('Data service not available');
     }
     
+    console.log('getContractData: Loading data from sheet...');
+    
     // Load data with retry logic (synchronous for Google Apps Script)
     let data;
     let attempts = 0;
@@ -412,11 +417,14 @@ function getContractData() {
     
     while (attempts < maxAttempts) {
       try {
+        console.log(`getContractData: Attempt ${attempts + 1} of ${maxAttempts}`);
         // Call loadContractData synchronously (it will handle async internally)
         data = appState.services.dataService.loadContractDataSync();
+        console.log(`getContractData: Successfully loaded ${data ? data.length : 0} records`);
         break;
       } catch (error) {
         attempts++;
+        console.error(`getContractData: Attempt ${attempts} failed:`, error.message);
         if (attempts >= maxAttempts) {
           throw error;
         }

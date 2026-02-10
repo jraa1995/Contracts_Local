@@ -55,16 +55,27 @@ async function initializeDashboard() {
  */
 async function loadDashboardData() {
     try {
+        console.log('Starting data load from Google Apps Script...');
+        
         // Call Google Apps Script function
         const data = await new Promise((resolve, reject) => {
             google.script.run
-                .withSuccessHandler(resolve)
-                .withFailureHandler(reject)
+                .withSuccessHandler((result) => {
+                    console.log('Data loaded successfully:', result ? result.length : 0, 'records');
+                    resolve(result);
+                })
+                .withFailureHandler((error) => {
+                    console.error('Google Apps Script error:', error);
+                    reject(error);
+                })
                 .getContractData();
         });
         
+        console.log('Processing loaded data...');
         contractData = data || [];
         filteredData = [...contractData];
+        
+        console.log('Initializing components with', contractData.length, 'contracts');
         
         // Initialize components with data
         filterController.initializeFilters(contractData);
@@ -75,9 +86,12 @@ async function loadDashboardData() {
         // Update dashboard
         updateDashboard();
         
+        console.log('Dashboard data loaded successfully');
+        
     } catch (error) {
         console.error('Error loading data:', error);
-        throw new Error('Failed to load contract data');
+        console.error('Error details:', error.message, error.stack);
+        throw new Error('Failed to load contract data: ' + error.message);
     }
 }
 
