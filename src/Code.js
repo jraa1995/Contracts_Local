@@ -256,7 +256,7 @@ function checkGASQuotas() {
 function setupPeriodicMaintenance() {
   try {
     // Clean up old export files daily
-    const cleanupTrigger = ScriptApp.newTrigger('cleanupExportFiles')
+    ScriptApp.newTrigger('cleanupExportFiles')
       .timeBased()
       .everyDays(1)
       .create();
@@ -411,7 +411,7 @@ function getContractPage(page, pageSize) {
       'AWARD_TITLE', 'AWARD', 'PROJECT', 'CONTRACT_TYPE',
       'CEILING', 'PM', 'CO', 'CS', 'PROJECT_TITLE',
       'PROJECT_START', 'PROJECT_END', 'Client_Bureau',
-      'client_organization', 'FLAGS', 'Mod_Status'
+      'client_organization', 'FLAGS', 'Mod_Status', 'IGE'
     ];
     
     var colMap = {};
@@ -482,7 +482,7 @@ function getContractDataTest() {
     var tz = Session.getScriptTimeZone();
     
     var want = ['AWARD_STATUS', 'AWARD', 'PROJECT', 'CEILING', 'PROJECT_TITLE',
-                'PROJECT_START', 'PROJECT_END', 'Client_Bureau', 'CONTRACT_TYPE'];
+                'PROJECT_START', 'PROJECT_END', 'Client_Bureau', 'CONTRACT_TYPE', 'IGE'];
     var colMap = {};
     for (var j = 0; j < headers.length; j++) {
       var h = String(headers[j]).trim();

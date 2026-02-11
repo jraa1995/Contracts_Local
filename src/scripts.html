@@ -124,9 +124,10 @@ function finishLoading() {
     return;
   }
   
-  // Normalize data — clean CEILING values (may arrive as "$3,714,230.41")
+  // Normalize data — clean CEILING and IGE values (may arrive as "$3,714,230.41")
   for (var i = 0; i < contractData.length; i++) {
     contractData[i].CEILING = parseCurrency(contractData[i].CEILING);
+    contractData[i].IGE = parseCurrency(contractData[i].IGE);
   }
   
   filteredData = contractData.slice();
@@ -196,10 +197,10 @@ function renderTable(data) {
   for (var i = 0; i < pageData.length; i++) {
     var c = pageData[i];
     var tr = document.createElement('tr');
-    tr.innerHTML = 
+    tr.innerHTML =
       '<td>' + esc(c.AWARD) + '</td>' +
-      '<td>' + esc(c.PROJECT_TITLE || c.PROJECT) + '</td>' +
-      '<td>N/A</td>' +
+      '<td>' + esc(c.AWARD_TITLE || '') + '</td>' +
+      '<td>' + formatMoney(parseCurrency(c.IGE)) + '</td>' +
       '<td>' + formatMoney(parseCurrency(c.CEILING)) + '</td>' +
       '<td><span class="status-badge ' + statusClass(c.AWARD_STATUS) + '">' + esc(c.AWARD_STATUS) + '</span></td>' +
       '<td>' + formatDate(c.PROJECT_START) + '</td>' +
@@ -842,6 +843,11 @@ var ChartManager = {
   },
 
   createOrganizationChart: function(data) {
+    // Helper function to truncate long labels
+    function truncateLabel(str, max) {
+      return str.length > max ? str.substring(0, max) + '...' : str;
+    }
+
     var sums = {};
     for (var i = 0; i < data.length; i++) {
       var org = String(data[i].Client_Bureau || data[i].client_organization || 'Unknown');
@@ -849,25 +855,57 @@ var ChartManager = {
     }
     var entries = Object.keys(sums).map(function(o) { return { org: o, total: sums[o] }; });
     entries.sort(function(a, b) { return b.total - a.total; });
-    entries = entries.slice(0, 10);
+    // Remove slice limit — show ALL organizations
     if (entries.length === 0) return this.showEmpty('organizationChart');
     this.clearEmpty('organizationChart');
     var canvas = document.getElementById('organizationChart');
     if (!canvas) return null;
+
+    // Store full names for tooltips
+    var fullLabels = entries.map(function(e) { return e.org; });
+    // Create truncated labels for display
+    var truncatedLabels = entries.map(function(e) { return truncateLabel(e.org, 25); });
+
+    // Calculate dynamic height based on number of organizations
+    var dynamicHeight = Math.max(400, entries.length * 28);
+    canvas.parentElement.style.height = dynamicHeight + 'px';
+
+    // Add scrollable class if height exceeds 600px
+    if (dynamicHeight > 600) {
+      canvas.parentElement.classList.add('scrollable');
+    } else {
+      canvas.parentElement.classList.remove('scrollable');
+    }
+
     var self = this;
     try {
       return new Chart(canvas, {
         type: 'bar',
         data: {
-          labels: entries.map(function(e) { return e.org; }),
+          labels: truncatedLabels,
           datasets: [{ label: 'Ceiling Value', data: entries.map(function(e) { return e.total; }),
             backgroundColor: entries.map(function(_, i) { return self.getGrayscaleColor(i); }),
             borderColor: '#1d1d1f', borderWidth: 1 }]
         },
         options: {
-          indexAxis: 'y', responsive: true, maintainAspectRatio: true,
-          aspectRatio: 1.2,
-          plugins: { legend: { display: false } },
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: function(context) {
+                  // Show full organization name in tooltip
+                  var index = context[0].dataIndex;
+                  return fullLabels[index];
+                },
+                label: function(context) {
+                  return 'Ceiling Value: ' + formatMoney(context.parsed.x);
+                }
+              }
+            }
+          },
           scales: {
             x: { ticks: { callback: function(v) { return formatMoney(v); }, color: '#666', font: { family: '-apple-system, sans-serif', size: 11 } }, grid: { color: '#e8e8ed' } },
             y: { ticks: { color: '#666', font: { family: '-apple-system, sans-serif', size: 11 }, autoSkip: false }, grid: { display: false } }
@@ -984,9 +1022,9 @@ function sortFilteredData() {
 function getSortValue(contract, column) {
   switch (column) {
     case 'award': return contract.AWARD || '';
-    case 'project': return contract.PROJECT_TITLE || contract.PROJECT || '';
+    case 'project': return contract.AWARD_TITLE || '';
     case 'ceiling': return parseCurrency(contract.CEILING);
-    case 'awardValue': return 0; // N/A column
+    case 'awardValue': return parseCurrency(contract.IGE);
     case 'status': return contract.AWARD_STATUS || '';
     case 'projectStart': return contract.PROJECT_START || '';
     case 'projectEnd': return contract.PROJECT_END || '';
