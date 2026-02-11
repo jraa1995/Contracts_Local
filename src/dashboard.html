@@ -59,11 +59,14 @@
             <div class="filters-header">
                 <h2>Filters</h2>
                 <div class="filter-actions">
+                    <button id="moreFiltersBtn" class="btn btn-secondary">More Filters</button>
                     <button id="clearFiltersBtn" class="btn btn-link">Clear All</button>
                     <button id="saveFiltersBtn" class="btn btn-link">Save Filters</button>
                 </div>
             </div>
-            <div class="filters-grid">
+
+            <!-- Primary Filters Row -->
+            <div class="filters-primary">
                 <!-- Search Filter -->
                 <div class="filter-group">
                     <label for="searchInput">Search</label>
@@ -74,7 +77,7 @@
                     </div>
                     <div class="search-suggestions" id="searchSuggestions" style="display: none;"></div>
                 </div>
-                
+
                 <!-- Status Filter -->
                 <div class="filter-group">
                     <label>Status</label>
@@ -86,7 +89,7 @@
                     </div>
                     <select id="statusFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
-                
+
                 <!-- Organization Filter -->
                 <div class="filter-group">
                     <label>Organization</label>
@@ -98,7 +101,7 @@
                     </div>
                     <select id="organizationFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
-                
+
                 <!-- Contract Type Filter -->
                 <div class="filter-group">
                     <label>Contract Type</label>
@@ -110,7 +113,10 @@
                     </div>
                     <select id="contractTypeFilter" class="form-select multi-select" multiple style="display:none;"></select>
                 </div>
-                
+            </div>
+
+            <!-- Secondary Filters (Hidden by default) -->
+            <div class="filters-secondary" id="filtersSecondary">
                 <!-- Date Range Filter -->
                 <div class="filter-group">
                     <label>Date Range</label>
@@ -132,7 +138,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Financial Range Filter -->
                 <div class="filter-group">
                     <label>Financial Range</label>

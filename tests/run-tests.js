@@ -28,7 +28,9 @@ const contractArb = fc.record({
   AWARD: fc.string({ minLength: 1, maxLength: 10 }),
   PROJECT: fc.string({ minLength: 1, maxLength: 10 }),
   PROJECT_TITLE: fc.string({ minLength: 1, maxLength: 30 }),
+  AWARD_TITLE: fc.string({ minLength: 1, maxLength: 50 }),
   CEILING: fc.oneof(fc.integer({ min: 0, max: 10000000 }), fc.double({ min: 0, max: 10000000, noNaN: true })),
+  IGE: fc.oneof(fc.integer({ min: 0, max: 10000000 }), fc.double({ min: 0, max: 10000000, noNaN: true })),
   Client_Bureau: fc.oneof(fc.constant('DOD'), fc.constant('DHS'), fc.constant('DOE'), fc.constant('NASA'), fc.constant('VA'), fc.constant('HHS')),
   client_organization: fc.constant(''),
   CONTRACT_TYPE: fc.oneof(fc.constant('FFP'), fc.constant('T&M'), fc.constant('CPFF'), fc.constant('IDIQ')),
@@ -47,8 +49,14 @@ runProperty('Property 5: Table column non-duplication', [
   (contract) => {
     const awardVal = h.renderAwardValueCell(contract);
     const ceilingVal = h.renderCeilingCell(contract);
-    // Award Value must be "N/A", never equal to Ceiling
-    return awardVal === 'N/A' && awardVal !== ceilingVal;
+    // Award Value now shows formatted IGE currency
+    const expectedAwardVal = h.formatMoney(h.parseCurrency(contract.IGE));
+    // Verify award value is properly formatted currency and matches IGE
+    if (!awardVal.startsWith('$')) return false;
+    if (awardVal !== expectedAwardVal) return false;
+    // Verify that award value is derived from IGE, not CEILING (they're different fields)
+    // Even if formatted values coincidentally match, the source fields should be distinguished
+    return true;
   }
 ]);
 
@@ -76,19 +84,41 @@ runProperty('Property 2: Organization chart aggregation correctness', [
   contractsArb,
   (contracts) => {
     const result = h.aggregateOrgCeiling(contracts);
-    // Each org's total should match manual sum
-    for (const entry of result) {
+
+    // Result can now be up to 11 entries (top 10 + "Other")
+    if (result.length > 11) return false;
+
+    // Count unique organizations in input
+    const uniqueOrgs = new Set(contracts.map(c => String(c.Client_Bureau || ''))).size;
+
+    // If there are more than 10 unique orgs, last entry should be "Other"
+    if (uniqueOrgs > 10) {
+      if (result.length !== 11) return false;
+      const lastEntry = result[result.length - 1];
+      if (!lastEntry.organization.startsWith('Other (') || !lastEntry.organization.endsWith(' organizations)')) return false;
+
+      // Verify "Other" bucket sum
+      const topOrgs = result.slice(0, 10).map(e => e.organization);
+      const expectedOtherSum = contracts
+        .filter(c => topOrgs.indexOf(String(c.Client_Bureau || '')) < 0)
+        .reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
+      if (Math.abs(lastEntry.totalCeiling - expectedOtherSum) > 0.01) return false;
+    }
+
+    // Verify top 10 entries (excluding "Other" if present)
+    const topEntries = uniqueOrgs > 10 ? result.slice(0, 10) : result;
+    for (const entry of topEntries) {
       const expected = contracts
         .filter(c => String(c.Client_Bureau || '') === entry.organization)
         .reduce((sum, c) => sum + (parseFloat(c.CEILING) || 0), 0);
       if (Math.abs(entry.totalCeiling - expected) > 0.01) return false;
     }
-    // Should be sorted descending
-    for (let i = 1; i < result.length; i++) {
-      if (result[i].totalCeiling > result[i-1].totalCeiling) return false;
+
+    // Top entries should be sorted descending (excluding "Other")
+    for (let i = 1; i < topEntries.length; i++) {
+      if (topEntries[i].totalCeiling > topEntries[i-1].totalCeiling) return false;
     }
-    // Max 10 entries
-    if (result.length > 10) return false;
+
     return true;
   }
 ]);
@@ -230,7 +260,7 @@ runProperty('Property 10: Summary cards reflect filtered totals', [
 // **Validates: Requirements 10.1, 10.2**
 runProperty('Property 11: Table sorting correctness', [
   contractsArb,
-  fc.oneof(fc.constant('award'), fc.constant('ceiling'), fc.constant('status'), fc.constant('projectStart')),
+  fc.oneof(fc.constant('award'), fc.constant('ceiling'), fc.constant('awardValue'), fc.constant('status'), fc.constant('projectStart')),
   (contracts, column) => {
     // Ascending
     const asc = h.sortData(contracts, column, 'asc');

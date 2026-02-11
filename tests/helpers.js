@@ -15,8 +15,8 @@ function parseCurrency(val) {
 
 // --- Table column rendering logic ---
 function renderAwardValueCell(contract) {
-  // Award Value column should show "N/A" — never duplicate CEILING
-  return 'N/A';
+  // Award Value column now shows IGE formatted as currency
+  return formatMoney(parseCurrency(contract.IGE));
 }
 
 function renderCeilingCell(contract) {
@@ -49,9 +49,20 @@ function aggregateOrgCeiling(data) {
     if (!sums[org]) sums[org] = 0;
     sums[org] += ceil;
   }
-  var result = Object.keys(sums).map(function(o) { return { organization: o, totalCeiling: sums[o] }; });
-  result.sort(function(a, b) { return b.totalCeiling - a.totalCeiling; });
-  return result.slice(0, 10);
+  var entries = Object.keys(sums).map(function(o) { return { organization: o, totalCeiling: sums[o] }; });
+  entries.sort(function(a, b) { return b.totalCeiling - a.totalCeiling; });
+
+  // Return top 10, plus "Other" bucket if there are more than 10
+  var result = entries.slice(0, 10);
+  if (entries.length > 10) {
+    var otherSum = 0;
+    for (var i = 10; i < entries.length; i++) {
+      otherSum += entries[i].totalCeiling;
+    }
+    var otherCount = entries.length - 10;
+    result.push({ organization: 'Other (' + otherCount + ' organizations)', totalCeiling: otherSum });
+  }
+  return result;
 }
 
 function aggregateTimelineCounts(data) {
@@ -153,8 +164,9 @@ function sortData(data, column, direction) {
 function getColumnValue(contract, column) {
   switch (column) {
     case 'award': return contract.AWARD || '';
-    case 'project': return contract.PROJECT_TITLE || contract.PROJECT || '';
+    case 'project': return contract.AWARD_TITLE || '';
     case 'ceiling': return parseCurrency(contract.CEILING);
+    case 'awardValue': return parseCurrency(contract.IGE);
     case 'status': return contract.AWARD_STATUS || '';
     case 'projectStart': return contract.PROJECT_START || '';
     case 'projectEnd': return contract.PROJECT_END || '';
@@ -165,7 +177,7 @@ function getColumnValue(contract, column) {
 
 function compareValues(a, b, column) {
   // Numeric columns
-  if (column === 'ceiling') {
+  if (column === 'ceiling' || column === 'awardValue') {
     return (a || 0) - (b || 0);
   }
   // Date columns

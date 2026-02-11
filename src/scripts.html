@@ -566,7 +566,30 @@ function setupEventListeners() {
       exportCSV(filteredData);
     });
   }
-  
+
+  // More Filters toggle
+  var moreFiltersBtn = document.getElementById('moreFiltersBtn');
+  if (moreFiltersBtn) {
+    moreFiltersBtn.addEventListener('click', function() {
+      var secondarySection = document.getElementById('filtersSecondary');
+      if (!secondarySection) return;
+
+      var isExpanded = secondarySection.classList.contains('expanded');
+
+      if (isExpanded) {
+        // Collapse
+        secondarySection.classList.remove('expanded');
+        moreFiltersBtn.classList.remove('expanded');
+        moreFiltersBtn.textContent = 'More Filters';
+      } else {
+        // Expand
+        secondarySection.classList.add('expanded');
+        moreFiltersBtn.classList.add('expanded');
+        moreFiltersBtn.textContent = 'Less Filters';
+      }
+    });
+  }
+
   // Date range inputs
   ['dateRangeStart', 'dateRangeEnd', 'dateFieldSelect'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -855,42 +878,59 @@ var ChartManager = {
     }
     var entries = Object.keys(sums).map(function(o) { return { org: o, total: sums[o] }; });
     entries.sort(function(a, b) { return b.total - a.total; });
-    // Remove slice limit — show ALL organizations
+
     if (entries.length === 0) return this.showEmpty('organizationChart');
     this.clearEmpty('organizationChart');
+
+    // Show top 10, aggregate the rest into "Other"
+    var top10 = entries.slice(0, 10);
+    var remaining = entries.slice(10);
+
+    var fullLabels = [];
+    var truncatedLabels = [];
+    var values = [];
+    var colors = [];
+    var otherCount = 0;
+    var otherTotal = 0;
+
+    var self = this;
+
+    // Add top 10 organizations
+    for (var i = 0; i < top10.length; i++) {
+      fullLabels.push(top10[i].org);
+      truncatedLabels.push(truncateLabel(top10[i].org, 25));
+      values.push(top10[i].total);
+      colors.push(self.getGrayscaleColor(i));
+    }
+
+    // Aggregate remaining organizations into "Other"
+    if (remaining.length > 0) {
+      otherCount = remaining.length;
+      for (var j = 0; j < remaining.length; j++) {
+        otherTotal += remaining[j].total;
+      }
+      fullLabels.push('Other (' + otherCount + ' organizations)');
+      truncatedLabels.push('Other (' + otherCount + ' orgs)');
+      values.push(otherTotal);
+      colors.push('#d2d2d7'); // Lighter gray for "Other"
+    }
+
     var canvas = document.getElementById('organizationChart');
     if (!canvas) return null;
 
-    // Store full names for tooltips
-    var fullLabels = entries.map(function(e) { return e.org; });
-    // Create truncated labels for display
-    var truncatedLabels = entries.map(function(e) { return truncateLabel(e.org, 25); });
-
-    // Calculate dynamic height based on number of organizations
-    var dynamicHeight = Math.max(400, entries.length * 28);
-    canvas.parentElement.style.height = dynamicHeight + 'px';
-
-    // Add scrollable class if height exceeds 600px
-    if (dynamicHeight > 600) {
-      canvas.parentElement.classList.add('scrollable');
-    } else {
-      canvas.parentElement.classList.remove('scrollable');
-    }
-
-    var self = this;
     try {
       return new Chart(canvas, {
         type: 'bar',
         data: {
           labels: truncatedLabels,
-          datasets: [{ label: 'Ceiling Value', data: entries.map(function(e) { return e.total; }),
-            backgroundColor: entries.map(function(_, i) { return self.getGrayscaleColor(i); }),
+          datasets: [{ label: 'Ceiling Value', data: values,
+            backgroundColor: colors,
             borderColor: '#1d1d1f', borderWidth: 1 }]
         },
         options: {
           indexAxis: 'y',
           responsive: true,
-          maintainAspectRatio: false,
+          maintainAspectRatio: true,
           plugins: {
             legend: { display: false },
             tooltip: {
