@@ -21,12 +21,12 @@
                     <span class="status-indicator connected"></span>
                     <span class="status-text">Connected</span>
                 </div>
-                <button id="refreshBtn" class="btn btn-secondary">
-                    <span class="icon">↻</span>
+                <button id="refreshBtn" class="btn btn-secondary" aria-label="Refresh dashboard data">
+                    <span class="icon" aria-hidden="true">↻</span>
                     Refresh
                 </button>
-                <button id="exportBtn" class="btn btn-primary">
-                    <span class="icon">⬇</span>
+                <button id="exportBtn" class="btn btn-primary" aria-label="Export contract data">
+                    <span class="icon" aria-hidden="true">⬇</span>
                     Export
                 </button>
             </div>
@@ -54,6 +54,18 @@
 
     <!-- Main Content -->
     <main class="dashboard-main">
+        <!-- Insights Banner -->
+        <section class="insights-banner warning" id="insightsBanner" role="alert" aria-live="polite">
+            <div class="insight-icon" aria-hidden="true">⚠</div>
+            <div class="insight-content">
+                <strong>Action Required</strong>
+                <p>3 contracts are expiring within 30 days. Review and plan renewals to avoid service interruptions.</p>
+            </div>
+            <div class="insight-action">
+                <button class="btn btn-secondary" aria-label="View expiring contracts">View Details</button>
+            </div>
+        </section>
+
         <!-- Filters Section -->
         <section class="filters-section">
             <div class="filters-header">
@@ -71,47 +83,47 @@
                 <div class="filter-group">
                     <label for="searchInput">Search</label>
                     <div class="search-input-container">
-                        <input type="text" id="searchInput" placeholder="Search contracts, awards, projects..." class="form-input search-input">
-                        <span class="search-icon">⌕</span>
-                        <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">&times;</button>
+                        <input type="text" id="searchInput" placeholder="Search contracts, awards, projects..." class="form-input search-input" aria-label="Search contracts, awards, and projects">
+                        <span class="search-icon" aria-hidden="true">⌕</span>
+                        <button id="clearSearchBtn" class="clear-search-btn" style="display: none;" aria-label="Clear search">&times;</button>
                     </div>
-                    <div class="search-suggestions" id="searchSuggestions" style="display: none;"></div>
+                    <div class="search-suggestions" id="searchSuggestions" style="display: none;" role="listbox"></div>
                 </div>
 
                 <!-- Status Filter -->
                 <div class="filter-group">
-                    <label>Status</label>
+                    <label for="statusFilter">Status</label>
                     <div class="dropdown-select" id="statusDropdown">
-                        <button type="button" class="dropdown-toggle form-input" id="statusToggle">All Statuses</button>
-                        <div class="dropdown-menu" id="statusMenu">
+                        <button type="button" class="dropdown-toggle form-input" id="statusToggle" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by status">All Statuses</button>
+                        <div class="dropdown-menu" id="statusMenu" role="listbox">
                             <!-- Populated dynamically -->
                         </div>
                     </div>
-                    <select id="statusFilter" class="form-select multi-select" multiple style="display:none;"></select>
+                    <select id="statusFilter" class="form-select multi-select" multiple style="display:none;" aria-label="Status filter"></select>
                 </div>
 
                 <!-- Organization Filter -->
                 <div class="filter-group">
-                    <label>Organization</label>
+                    <label for="organizationFilter">Organization</label>
                     <div class="dropdown-select" id="orgDropdown">
-                        <button type="button" class="dropdown-toggle form-input" id="orgToggle">All Organizations</button>
-                        <div class="dropdown-menu" id="orgMenu">
+                        <button type="button" class="dropdown-toggle form-input" id="orgToggle" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by organization">All Organizations</button>
+                        <div class="dropdown-menu" id="orgMenu" role="listbox">
                             <!-- Populated dynamically -->
                         </div>
                     </div>
-                    <select id="organizationFilter" class="form-select multi-select" multiple style="display:none;"></select>
+                    <select id="organizationFilter" class="form-select multi-select" multiple style="display:none;" aria-label="Organization filter"></select>
                 </div>
 
                 <!-- Contract Type Filter -->
                 <div class="filter-group">
-                    <label>Contract Type</label>
+                    <label for="contractTypeFilter">Contract Type</label>
                     <div class="dropdown-select" id="typeDropdown">
-                        <button type="button" class="dropdown-toggle form-input" id="typeToggle">All Types</button>
-                        <div class="dropdown-menu" id="typeMenu">
+                        <button type="button" class="dropdown-toggle form-input" id="typeToggle" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by contract type">All Types</button>
+                        <div class="dropdown-menu" id="typeMenu" role="listbox">
                             <!-- Populated dynamically -->
                         </div>
                     </div>
-                    <select id="contractTypeFilter" class="form-select multi-select" multiple style="display:none;"></select>
+                    <select id="contractTypeFilter" class="form-select multi-select" multiple style="display:none;" aria-label="Contract type filter"></select>
                 </div>
             </div>
 
@@ -172,31 +184,31 @@
         </section>
 
         <!-- Summary Cards -->
-        <section class="summary-section">
+        <section class="summary-section" role="region" aria-label="Contract summary metrics">
             <div class="summary-cards">
                 <div class="summary-card">
-                    <div class="card-icon">$</div>
+                    <div class="card-icon" aria-hidden="true">$</div>
                     <div class="card-content">
                         <h3>Total Contract Value</h3>
                         <p class="card-value currency" id="totalValue">$0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">■</div>
+                    <div class="card-icon" aria-hidden="true">■</div>
                     <div class="card-content">
                         <h3>Active Contracts</h3>
                         <p class="card-value count" id="activeCount">0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">✓</div>
+                    <div class="card-icon" aria-hidden="true">✓</div>
                     <div class="card-content">
                         <h3>Completed Contracts</h3>
                         <p class="card-value count" id="completedCount">0</p>
                     </div>
                 </div>
                 <div class="summary-card">
-                    <div class="card-icon">≡</div>
+                    <div class="card-icon" aria-hidden="true">≡</div>
                     <div class="card-content">
                         <h3>Total Contracts</h3>
                         <p class="card-value percentage" id="budgetUtilization">0</p>
@@ -206,7 +218,7 @@
         </section>
 
         <!-- Charts Section -->
-        <section class="charts-section">
+        <section class="charts-section" role="region" aria-label="Contract data visualizations">
             <span id="chartUpdateIndicator" style="display:none;"></span>
             <div class="charts-grid">
                 <div class="chart-container">
@@ -229,12 +241,13 @@
         </section>
 
         <!-- Data Table Section -->
-        <section class="table-section">
+        <section class="table-section" role="region" aria-label="Contract details table">
             <div class="table-header">
                 <h2>Contract Details</h2>
                 <div class="table-actions">
-                    <button id="exportTableBtn" class="btn btn-secondary">Export Table</button>
-                    <select id="pageSizeSelect" class="form-select">
+                    <button id="exportTableBtn" class="btn btn-secondary" aria-label="Export table data">Export Table</button>
+                    <label for="pageSizeSelect" class="hidden">Items per page</label>
+                    <select id="pageSizeSelect" class="form-select" aria-label="Select number of items per page">
                         <option value="25">25 per page</option>
                         <option value="50" selected>50 per page</option>
                         <option value="100">100 per page</option>
@@ -262,23 +275,23 @@
             </div>
             <div class="pagination-container">
                 <div class="pagination-info">
-                    <span id="paginationInfo">Showing 0 of 0 contracts</span>
+                    <span id="paginationInfo" role="status" aria-live="polite">Showing 0 of 0 contracts</span>
                 </div>
-                <div class="pagination-controls">
-                    <button id="prevPageBtn" class="btn btn-secondary" disabled>Previous</button>
-                    <span id="pageNumbers" class="page-numbers"></span>
-                    <button id="nextPageBtn" class="btn btn-secondary" disabled>Next</button>
-                </div>
+                <nav class="pagination-controls" role="navigation" aria-label="Table pagination">
+                    <button id="prevPageBtn" class="btn btn-secondary" disabled aria-label="Go to previous page">Previous</button>
+                    <span id="pageNumbers" class="page-numbers" role="list"></span>
+                    <button id="nextPageBtn" class="btn btn-secondary" disabled aria-label="Go to next page">Next</button>
+                </nav>
             </div>
         </section>
     </main>
 
     <!-- Error Modal -->
-    <div id="errorModal" class="modal">
+    <div id="errorModal" class="modal" role="dialog" aria-labelledby="errorModalTitle" aria-modal="true">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Error</h3>
-                <button class="modal-close">&times;</button>
+                <h3 id="errorModalTitle">Error</h3>
+                <button class="modal-close" onclick="closeErrorModal()" aria-label="Close error dialog">&times;</button>
             </div>
             <div class="modal-body">
                 <p id="errorMessage">An error occurred.</p>
@@ -290,11 +303,11 @@
     </div>
 
     <!-- Export Modal -->
-    <div id="exportModal" class="modal">
+    <div id="exportModal" class="modal" role="dialog" aria-labelledby="exportModalTitle" aria-modal="true">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Export Data</h3>
-                <button class="modal-close" onclick="closeExportModal()">&times;</button>
+                <h3 id="exportModalTitle">Export Data</h3>
+                <button class="modal-close" onclick="closeExportModal()" aria-label="Close export dialog">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="export-section">

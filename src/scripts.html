@@ -32,35 +32,147 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeDashboard() {
-  showLoading(true, 'Connecting to data source...');
-  
-  // First: quick test with 5 rows to verify pipeline
-  debugLog('Testing data pipeline with 5 rows...');
+  showLoading(true, 'Loading dashboard...');
+
+  debugLog('Starting two-phase parallel loading strategy...');
+
+  // Phase 1: Load aggregated metadata (summary, filters, charts) - IMMEDIATE
+  debugLog('Phase 1: Requesting aggregated metadata...');
   google.script.run
-    .withSuccessHandler(function(result) {
-      debugLog('Test result: ' + JSON.stringify(result).substring(0, 300));
-      if (result && result.success && result.data && result.data.length > 0) {
-        debugLog('Pipeline OK. Columns: ' + (result.columns || []).join(', '));
-        debugLog('Sample row: ' + JSON.stringify(result.data[0]).substring(0, 200));
-        // Pipeline works — now load all data in pages
-        loadAllPages();
+    .withSuccessHandler(function(metadata) {
+      debugLog('Metadata received: ' + JSON.stringify(metadata).substring(0, 300));
+      if (metadata && metadata.success) {
+        debugLog('Rendering dashboard from metadata...');
+        handleMetadataResponse(metadata);
       } else {
-        debugLog('ERROR: Test returned no data. Result: ' + JSON.stringify(result));
-        showLoading(false);
-        showError('No data returned from AL_Extract sheet. Check that the sheet exists and has data starting at row 3.');
+        debugLog('WARNING: Metadata call failed or returned no data. Fallback to legacy mode.');
+        // Fallback to old paginated loading
+        loadAllPages();
       }
     })
     .withFailureHandler(function(err) {
-      debugLog('ERROR in test call: ' + (err.message || err));
-      showLoading(false);
-      showError('Server error: ' + (err.message || err));
+      debugLog('ERROR in metadata call: ' + (err.message || err));
+      debugLog('Falling back to legacy paginated loading...');
+      // Fallback to old method
+      loadAllPages();
     })
-    .getContractDataTest();
+    .getAggregatedMetadata();
+
+  // Phase 2: Load full bulk data - BACKGROUND
+  debugLog('Phase 2: Requesting bulk contract data...');
+  google.script.run
+    .withSuccessHandler(function(result) {
+      debugLog('Bulk data received: ' + (result.data ? result.data.length : 0) + ' contracts');
+      if (result && result.success && result.data) {
+        handleBulkDataResponse(result.data);
+      } else {
+        debugLog('WARNING: Bulk data call failed. Fallback to legacy mode.');
+        loadAllPages();
+      }
+    })
+    .withFailureHandler(function(err) {
+      debugLog('ERROR in bulk data call: ' + (err.message || err));
+      debugLog('Falling back to legacy paginated loading...');
+      loadAllPages();
+    })
+    .getContractDataBulk();
 }
 
-// ---- Paginated Data Loading ----
+// Handle Phase 1: Metadata response (immediate dashboard render)
+function handleMetadataResponse(metadata) {
+  debugLog('Processing metadata response...');
+
+  // Render summary cards from pre-computed data
+  if (metadata.summary) {
+    setText('totalValue', formatMoney(metadata.summary.totalCeiling || 0));
+    setText('activeCount', String(metadata.summary.activeCount || 0));
+    setText('completedCount', String(metadata.summary.completedCount || 0));
+    setText('budgetUtilization', (metadata.summary.totalContracts || 0) + ' total');
+    debugLog('Summary cards rendered from metadata');
+  }
+
+  // Populate filters from pre-computed options
+  if (metadata.filters) {
+    debugLog('Populating filters from metadata...');
+    var statusKeys = metadata.filters.statuses || [];
+    var orgKeys = metadata.filters.organizations || [];
+    var typeKeys = metadata.filters.types || [];
+
+    fillSelect('statusFilter', statusKeys);
+    fillSelect('organizationFilter', orgKeys);
+    fillSelect('contractTypeFilter', typeKeys);
+
+    buildDropdownMenu('statusMenu', statusKeys, 'statusFilter', 'statusToggle', 'All Statuses');
+    buildDropdownMenu('orgMenu', orgKeys, 'organizationFilter', 'orgToggle', 'All Organizations');
+    buildDropdownMenu('typeMenu', typeKeys, 'contractTypeFilter', 'typeToggle', 'All Types');
+
+    setupDropdownToggle('statusToggle', 'statusMenu');
+    setupDropdownToggle('orgToggle', 'orgMenu');
+    setupDropdownToggle('typeToggle', 'typeMenu');
+
+    // Setup dropdown close handler
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.dropdown-select')) {
+        document.querySelectorAll('.dropdown-menu').forEach(function(m) { m.classList.remove('open'); });
+      }
+    });
+  }
+
+  // Initialize charts from pre-aggregated data
+  if (metadata.charts) {
+    debugLog('Initializing charts from metadata...');
+    ChartManager.initFromMetadata(metadata.charts);
+  }
+
+  // Update insight banner with proactive alerts
+  updateInsightsBanner(metadata);
+
+  // Add delta indicators to summary cards
+  updateCardDeltas(metadata);
+
+  // Setup event listeners (filters, search, etc.)
+  setupEventListeners();
+
+  // Update loading message to show Phase 2 is in progress
+  showLoading(true, 'Loading full dataset in background...');
+
+  debugLog('Dashboard rendered from metadata - user can interact immediately');
+}
+
+// Handle Phase 2: Bulk data response (enable table and full filtering)
+function handleBulkDataResponse(data) {
+  debugLog('Processing bulk data response: ' + data.length + ' contracts');
+
+  // Normalize data
+  for (var i = 0; i < data.length; i++) {
+    data[i].CEILING = parseCurrency(data[i].CEILING);
+    data[i].IGE = parseCurrency(data[i].IGE);
+  }
+
+  contractData = data;
+  filteredData = data.slice();
+
+  if (contractData.length > 0) {
+    debugLog('Sample contract keys: ' + Object.keys(contractData[0]).join(', '));
+  }
+
+  // Render table now that full data is available
+  renderTable(filteredData);
+
+  // Hide loading overlay
+  showLoading(false);
+
+  debugLog('Full dataset loaded - table rendering enabled');
+}
+
+// ============================================
+// DEPRECATED: Legacy Paginated Data Loading
+// These functions are kept for backward compatibility and fallback
+// when the new bulk endpoints are unavailable
+// ============================================
+
 function loadAllPages() {
-  debugLog('Getting contract info...');
+  debugLog('Getting contract info (legacy fallback mode)...');
   google.script.run
     .withSuccessHandler(function(info) {
       if (!info || !info.success) {
@@ -90,11 +202,11 @@ function loadPage(page, totalPages, pageSize) {
     finishLoading();
     return;
   }
-  
+
   var pct = Math.round(((page + 1) / totalPages) * 100);
   showLoading(true, 'Loading page ' + (page + 1) + ' of ' + totalPages + ' (' + pct + '%)');
   debugLog('Loading page ' + (page + 1) + '/' + totalPages + '...');
-  
+
   google.script.run
     .withSuccessHandler(function(result) {
       if (result && result.success && result.data) {
@@ -132,8 +244,10 @@ function finishLoading() {
   
   filteredData = contractData.slice();
   debugLog('Rendering dashboard with ' + contractData.length + ' contracts');
-  debugLog('Sample contract keys: ' + Object.keys(contractData[0]).join(', '));
-  debugLog('Sample contract: ' + JSON.stringify(contractData[0]).substring(0, 300));
+  if (contractData.length > 0) {
+    debugLog('Sample contract keys: ' + Object.keys(contractData[0]).join(', '));
+    debugLog('Sample contract: ' + JSON.stringify(contractData[0]).substring(0, 300));
+  }
   
   // Populate filters
   populateFilters();
@@ -176,6 +290,86 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+// ---- Insight Banner ----
+function updateInsightsBanner(metadata) {
+  var banner = document.getElementById('insightsBanner');
+  if (!banner) return;
+
+  var insights = [];
+
+  // Count contracts expiring within 30 days
+  if (metadata.insights && metadata.insights.expiringWithin30Days > 0) {
+    var expiringCount = metadata.insights.expiringWithin30Days;
+    insights.push(expiringCount + ' contract' + (expiringCount === 1 ? ' is' : 's are') + ' expiring within 30 days. Review and plan renewals to avoid service interruptions.');
+  }
+
+  // Portfolio change indicator
+  if (metadata.insights && metadata.insights.portfolioChange) {
+    insights.push('Portfolio value ' + metadata.insights.portfolioChange);
+  }
+
+  // Display insights or hide banner if none
+  if (insights.length > 0) {
+    var content = banner.querySelector('.insight-content');
+    if (content) {
+      content.innerHTML = '<strong>Action Required</strong><p>' + esc(insights.join(' ')) + '</p>';
+    }
+    banner.style.display = '';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  debugLog('Insights banner updated: ' + insights.length + ' alerts');
+}
+
+// ---- Delta Indicators on Summary Cards ----
+function updateCardDeltas(metadata) {
+  if (!metadata || !metadata.deltas) return;
+
+  var deltas = metadata.deltas;
+
+  // Add delta indicators to each card
+  if (deltas.totalValue !== undefined) {
+    addDeltaToCard('totalValue', deltas.totalValue);
+  }
+
+  if (deltas.activeCount !== undefined) {
+    addDeltaToCard('activeCount', deltas.activeCount);
+  }
+
+  if (deltas.completedCount !== undefined) {
+    addDeltaToCard('completedCount', deltas.completedCount);
+  }
+
+  if (deltas.budgetUtilization !== undefined) {
+    addDeltaToCard('budgetUtilization', deltas.budgetUtilization);
+  }
+
+  debugLog('Delta indicators added to summary cards');
+}
+
+function addDeltaToCard(cardId, deltaText) {
+  var el = document.getElementById(cardId);
+  if (!el || !el.parentElement) return;
+
+  // Check if delta element already exists
+  var existingDelta = el.parentElement.querySelector('.card-delta');
+  if (existingDelta) {
+    existingDelta.textContent = deltaText;
+    return;
+  }
+
+  // Create new delta element
+  var delta = document.createElement('div');
+  delta.className = 'card-delta';
+  delta.textContent = deltaText;
+  delta.style.fontSize = '12px';
+  delta.style.color = '#666';
+  delta.style.marginTop = '4px';
+
+  el.parentElement.appendChild(delta);
+}
+
 // ---- Table Rendering ----
 function renderTable(data) {
   var tbody = document.querySelector('#contractsTable tbody');
@@ -188,7 +382,7 @@ function renderTable(data) {
     setText('paginationInfo', 'Showing 0 of 0 contracts');
     return;
   }
-  
+
   // Paginate
   var start = (currentPage - 1) * tablePageSize;
   var end = Math.min(start + tablePageSize, data.length);
@@ -461,7 +655,10 @@ function applyFilters() {
 }
 
 // ---- Event Listeners ----
+var listenersInitialized = false;
 function setupEventListeners() {
+  if (listenersInitialized) return;
+  listenersInitialized = true;
   // Search
   var searchInput = document.getElementById('searchInput');
   if (searchInput) {
@@ -718,7 +915,7 @@ function updateActiveFilterTags() {
   tags.forEach(function(tag) {
     var el = document.createElement('span');
     el.className = 'active-filter-tag';
-    el.innerHTML = tag.label + ' <button class="remove-filter">&times;</button>';
+    el.innerHTML = esc(tag.label) + ' <button class="remove-filter">&times;</button>';
     el.querySelector('.remove-filter').addEventListener('click', function() {
       tag.clear();
       applyFilters();
@@ -773,15 +970,25 @@ function closeErrorModal() {
   if (m) m.style.display = 'none';
 }
 
+function closeExportModal() {
+  var m = document.getElementById('exportModal');
+  if (m) m.style.display = 'none';
+}
+
+function performExport() {
+  exportCSV(filteredData);
+  closeExportModal();
+}
+
 // ============================================
-// ChartManager — Chart.js rendering (grayscale)
+// ChartManager — Chart.js rendering (GSA blue palette)
 // ============================================
 var ChartManager = {
   chartInstances: { status: null, organization: null, timeline: null, trends: null },
-  grayscaleColors: ['#1d1d1f', '#333', '#555', '#666', '#86868b', '#999', '#a1a1a6', '#d2d2d7'],
+  gsaBlueColors: ['#003C71', '#005EA2', '#0076D6', '#3D9BE9', '#73B3E7', '#A3C9F1', '#C9DFF5', '#E1F3F8', '#004F8A', '#002D56'],
 
-  getGrayscaleColor: function(index) {
-    return this.grayscaleColors[index % this.grayscaleColors.length];
+  getChartColor: function(index) {
+    return this.gsaBlueColors[index % this.gsaBlueColors.length];
   },
 
   destroy: function() {
@@ -799,6 +1006,142 @@ var ChartManager = {
     this.chartInstances.organization = this.createOrganizationChart(data);
     this.chartInstances.timeline = this.createTimelineChart(data);
     this.chartInstances.trends = this.createTrendsChart(data);
+  },
+
+  // Initialize charts from pre-aggregated metadata (Phase 1)
+  initFromMetadata: function(chartsData) {
+    debugLog('Initializing charts from metadata...');
+    this.destroy();
+
+    if (chartsData.status) {
+      this.chartInstances.status = this.createChartFromMetadata('statusChart', 'doughnut', chartsData.status);
+    }
+
+    if (chartsData.organization) {
+      this.chartInstances.organization = this.createChartFromMetadata('organizationChart', 'bar', chartsData.organization, { indexAxis: 'y' });
+    }
+
+    if (chartsData.timeline) {
+      this.chartInstances.timeline = this.createChartFromMetadata('timelineChart', 'bar', chartsData.timeline);
+    }
+
+    if (chartsData.trends) {
+      this.chartInstances.trends = this.createChartFromMetadata('trendsChart', 'line', chartsData.trends);
+    }
+
+    debugLog('Charts initialized from metadata');
+  },
+
+  // Create chart from pre-aggregated metadata
+  createChartFromMetadata: function(canvasId, type, chartData, extraOptions) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) {
+      debugLog('Canvas not found: ' + canvasId);
+      return null;
+    }
+
+    if (!chartData || !chartData.labels || chartData.labels.length === 0) {
+      return this.showEmpty(canvasId);
+    }
+
+    this.clearEmpty(canvasId);
+
+    var self = this;
+    var colors = chartData.labels.map(function(_, i) { return self.getChartColor(i); });
+
+    var datasets = chartData.datasets || [];
+    if (datasets.length === 0 && chartData.data) {
+      // Single dataset case
+      datasets = [{
+        label: chartData.label || 'Value',
+        data: chartData.data,
+        backgroundColor: type === 'line' ? 'rgba(0, 60, 113, 0.1)' : colors,
+        borderColor: type === 'line' ? '#003C71' : (type === 'doughnut' ? '#fff' : '#003C71'),
+        borderWidth: type === 'doughnut' ? 2 : 1,
+        fill: type === 'line',
+        tension: type === 'line' ? 0.3 : undefined,
+        pointBackgroundColor: type === 'line' ? '#005EA2' : undefined,
+        pointBorderColor: type === 'line' ? '#003C71' : undefined
+      }];
+    } else {
+      // Multiple datasets - apply blue palette
+      datasets = datasets.map(function(ds, idx) {
+        return {
+          label: ds.label || 'Value',
+          data: ds.data,
+          backgroundColor: type === 'line' ? 'rgba(0, 60, 113, 0.1)' : (ds.backgroundColor || colors),
+          borderColor: type === 'line' ? self.getChartColor(idx) : (ds.borderColor || '#003C71'),
+          borderWidth: type === 'doughnut' ? 2 : 1,
+          fill: type === 'line',
+          tension: type === 'line' ? 0.3 : undefined,
+          pointBackgroundColor: type === 'line' ? self.getChartColor(idx) : undefined,
+          pointBorderColor: type === 'line' ? self.getChartColor(idx) : undefined
+        };
+      });
+    }
+
+    var options = {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: type === 'doughnut' ? 'bottom' : 'top',
+          display: type === 'doughnut' || datasets.length > 1,
+          labels: {
+            font: { family: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif' },
+            color: '#666'
+          }
+        },
+        tooltip: {
+          callbacks: chartData.tooltipCallbacks || {}
+        }
+      }
+    };
+
+    // Add scales for non-doughnut charts
+    if (type !== 'doughnut') {
+      options.scales = {
+        x: {
+          ticks: {
+            callback: chartData.xTickFormat || undefined,
+            color: '#666',
+            font: { family: '-apple-system, sans-serif', size: 11 }
+          },
+          grid: { color: '#e8e8ed' }
+        },
+        y: {
+          ticks: {
+            callback: chartData.yTickFormat || undefined,
+            color: '#666',
+            font: { family: '-apple-system, sans-serif', size: 11 },
+            autoSkip: extraOptions && extraOptions.indexAxis === 'y' ? false : undefined
+          },
+          grid: { color: extraOptions && extraOptions.indexAxis === 'y' ? 'transparent' : '#e8e8ed' },
+          beginAtZero: type === 'bar'
+        }
+      };
+    }
+
+    // Merge extra options
+    if (extraOptions) {
+      for (var key in extraOptions) {
+        options[key] = extraOptions[key];
+      }
+    }
+
+    try {
+      return new Chart(canvas, {
+        type: type,
+        data: {
+          labels: chartData.labels,
+          datasets: datasets
+        },
+        options: options
+      });
+    } catch(e) {
+      debugLog('Chart error (' + canvasId + '): ' + e.message);
+      return this.showEmpty(canvasId);
+    }
   },
 
   updateAll: function(data) {
@@ -854,7 +1197,7 @@ var ChartManager = {
         data: {
           labels: labels,
           datasets: [{ data: labels.map(function(l) { return counts[l]; }),
-            backgroundColor: labels.map(function(_, i) { return self.getGrayscaleColor(i); }),
+            backgroundColor: labels.map(function(_, i) { return self.getChartColor(i); }),
             borderColor: '#fff', borderWidth: 2 }]
         },
         options: {
@@ -900,7 +1243,7 @@ var ChartManager = {
       fullLabels.push(top10[i].org);
       truncatedLabels.push(truncateLabel(top10[i].org, 25));
       values.push(top10[i].total);
-      colors.push(self.getGrayscaleColor(i));
+      colors.push(self.getChartColor(i));
     }
 
     // Aggregate remaining organizations into "Other"
@@ -912,7 +1255,7 @@ var ChartManager = {
       fullLabels.push('Other (' + otherCount + ' organizations)');
       truncatedLabels.push('Other (' + otherCount + ' orgs)');
       values.push(otherTotal);
-      colors.push('#d2d2d7'); // Lighter gray for "Other"
+      colors.push('#C9DFF5'); // Lighter blue for "Other"
     }
 
     var canvas = document.getElementById('organizationChart');
@@ -925,7 +1268,7 @@ var ChartManager = {
           labels: truncatedLabels,
           datasets: [{ label: 'Ceiling Value', data: values,
             backgroundColor: colors,
-            borderColor: '#1d1d1f', borderWidth: 1 }]
+            borderColor: '#003C71', borderWidth: 1 }]
         },
         options: {
           indexAxis: 'y',
@@ -975,7 +1318,7 @@ var ChartManager = {
         data: {
           labels: years.map(String),
           datasets: [{ label: 'Contracts', data: years.map(function(y) { return counts[y]; }),
-            backgroundColor: '#555', borderColor: '#333', borderWidth: 1 }]
+            backgroundColor: '#0076D6', borderColor: '#005EA2', borderWidth: 1 }]
         },
         options: {
           responsive: true, maintainAspectRatio: true,
@@ -1009,8 +1352,8 @@ var ChartManager = {
         data: {
           labels: years.map(String),
           datasets: [{ label: 'Total Ceiling', data: years.map(function(y) { return sums[y]; }),
-            borderColor: '#1d1d1f', backgroundColor: 'rgba(0,0,0,0.05)',
-            fill: true, tension: 0.3, pointBackgroundColor: '#333', pointBorderColor: '#1d1d1f' }]
+            borderColor: '#003C71', backgroundColor: 'rgba(0, 60, 113, 0.1)',
+            fill: true, tension: 0.3, pointBackgroundColor: '#005EA2', pointBorderColor: '#003C71' }]
         },
         options: {
           responsive: true, maintainAspectRatio: true,

@@ -508,6 +508,596 @@ function getContractDataTest() {
     return { success: false, error: e.message };
   }
 }
+
+// ============================================================================
+// OPTIMIZED BULK DATA RETRIEVAL FUNCTIONS
+// ============================================================================
+
+/**
+ * Generate a quick hash of the dataset for cache invalidation
+ * Checks lastRow + spot check of first/last cells to detect changes
+ * @returns {string} Hash representing current dataset state
+ */
+function getDatasetHash() {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AL_Extract');
+    if (!sheet) return 'error_no_sheet';
+
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+
+    // Spot check: first data cell and last data cell
+    var firstCell = '';
+    var lastCell = '';
+
+    if (lastRow >= 3) {
+      try {
+        firstCell = String(sheet.getRange(3, 1).getValue());
+        lastCell = String(sheet.getRange(lastRow, lastCol).getValue());
+      } catch (e) {
+        // If cell read fails, just use row/col info
+      }
+    }
+
+    // Create hash from row count + cell samples
+    var hashInput = lastRow + '_' + lastCol + '_' + firstCell + '_' + lastCell;
+    return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, hashInput)
+      .map(function(byte) { return (byte & 0xFF).toString(16).padStart(2, '0'); })
+      .join('');
+
+  } catch (e) {
+    console.error('Error computing dataset hash:', e);
+    return 'error_' + new Date().getTime();
+  }
+}
+
+/**
+ * Retrieve and decompress cached bulk data
+ * @param {string} cacheKey - Base cache key
+ * @returns {Array|null} Decompressed data or null if not found
+ */
+function getCachedBulkData(cacheKey) {
+  try {
+    var cache = CacheService.getScriptCache();
+
+    // Get metadata about cached chunks
+    var metaKey = cacheKey + '_meta';
+    var metaStr = cache.get(metaKey);
+
+    if (!metaStr) {
+      console.log('No cached data found for key:', cacheKey);
+      return null;
+    }
+
+    var meta = JSON.parse(metaStr);
+    var chunkCount = meta.chunkCount;
+
+    // Retrieve all chunks
+    var chunks = [];
+    for (var i = 0; i < chunkCount; i++) {
+      var chunkKey = cacheKey + '_chunk_' + i;
+      var chunk = cache.get(chunkKey);
+
+      if (!chunk) {
+        console.warn('Missing chunk', i, 'for cache key:', cacheKey);
+        return null; // Cache incomplete, return null
+      }
+
+      chunks.push(chunk);
+    }
+
+    // Combine chunks and decompress
+    var compressed = chunks.join('');
+    var blob = Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(compressed), 'application/x-gzip'));
+    var jsonStr = blob.getDataAsString();
+    var data = JSON.parse(jsonStr);
+
+    console.log('Successfully retrieved cached data:', data.length, 'rows from', chunkCount, 'chunks');
+    return data;
+
+  } catch (e) {
+    console.error('Error retrieving cached bulk data:', e);
+    return null;
+  }
+}
+
+/**
+ * Compress and store data in cache chunks
+ * @param {string} cacheKey - Base cache key
+ * @param {Array} data - Data to cache
+ * @param {number} ttl - Time to live in seconds (default 21600 = 6 hours)
+ * @returns {boolean} Success indicator
+ */
+function setCachedBulkData(cacheKey, data, ttl) {
+  try {
+    ttl = ttl || 21600; // 6 hours default (max for CacheService)
+    var cache = CacheService.getScriptCache();
+
+    // Compress data
+    var jsonStr = JSON.stringify(data);
+    var compressed = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(jsonStr)));
+
+    var compressedSize = compressed.length;
+    console.log('Compressed data size:', compressedSize, 'bytes');
+
+    // Split into chunks (90KB each to stay under 100KB limit with overhead)
+    var maxChunkSize = 90000;
+    var chunks = [];
+
+    for (var i = 0; i < compressed.length; i += maxChunkSize) {
+      chunks.push(compressed.substring(i, Math.min(i + maxChunkSize, compressed.length)));
+    }
+
+    console.log('Split into', chunks.length, 'chunks');
+
+    // Store chunks
+    for (var j = 0; j < chunks.length; j++) {
+      var chunkKey = cacheKey + '_chunk_' + j;
+      cache.put(chunkKey, chunks[j], ttl);
+    }
+
+    // Store metadata
+    var meta = {
+      chunkCount: chunks.length,
+      originalSize: jsonStr.length,
+      compressedSize: compressedSize,
+      rowCount: data.length,
+      timestamp: new Date().toISOString()
+    };
+
+    cache.put(cacheKey + '_meta', JSON.stringify(meta), ttl);
+
+    console.log('Successfully cached', data.length, 'rows in', chunks.length, 'chunks');
+    return true;
+
+  } catch (e) {
+    console.error('Error caching bulk data:', e);
+    return false;
+  }
+}
+
+/**
+ * Invalidate all cached data
+ * @returns {Object} Result of cache invalidation
+ */
+function invalidateCache() {
+  try {
+    var cache = CacheService.getScriptCache();
+
+    // Remove specific cache keys
+    var keysToRemove = [
+      'bulk_contracts',
+      'bulk_contracts_meta',
+      'aggregated_metadata'
+    ];
+
+    // Also remove chunk keys (up to 20 chunks max expected)
+    for (var i = 0; i < 20; i++) {
+      keysToRemove.push('bulk_contracts_chunk_' + i);
+    }
+
+    cache.removeAll(keysToRemove);
+
+    console.log('Cache invalidated:', keysToRemove.length, 'keys removed');
+
+    return {
+      success: true,
+      keysRemoved: keysToRemove.length,
+      timestamp: new Date().toISOString()
+    };
+
+  } catch (e) {
+    console.error('Error invalidating cache:', e);
+    return {
+      success: false,
+      error: e.message
+    };
+  }
+}
+
+/**
+ * Get ALL contract data in a single bulk response
+ * Reads all data at once, filters to 19 columns, compresses and caches
+ * @returns {Object} { success, data, hash, cached, rowCount, compressionRatio }
+ */
+function getContractDataBulk() {
+  try {
+    var startTime = new Date();
+
+    // Get current dataset hash
+    var currentHash = getDatasetHash();
+    var cacheKey = 'bulk_contracts';
+    var cache = CacheService.getScriptCache();
+
+    // Check if hash matches cached version
+    var cachedHash = cache.get('bulk_contracts_hash');
+
+    if (cachedHash === currentHash) {
+      console.log('Dataset hash match, attempting to retrieve from cache');
+      var cachedData = getCachedBulkData(cacheKey);
+
+      if (cachedData) {
+        var cacheTime = new Date() - startTime;
+        console.log('Returned cached data in', cacheTime, 'ms');
+
+        return {
+          success: true,
+          data: cachedData,
+          hash: currentHash,
+          cached: true,
+          rowCount: cachedData.length,
+          responseTime: cacheTime
+        };
+      }
+    }
+
+    console.log('Cache miss or hash mismatch, reading from sheet');
+
+    // Read from sheet
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AL_Extract');
+    if (!sheet) {
+      return { success: false, error: 'AL_Extract sheet not found' };
+    }
+
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+
+    if (lastRow < 3) {
+      return { success: true, data: [], hash: currentHash, cached: false, rowCount: 0 };
+    }
+
+    // Read headers from row 2
+    var headers = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+
+    // Define the 19 wanted columns
+    var wantedColumns = [
+      'AWARD_STATUS', 'APEXNAME', 'EMP_ORG_SHORT_NAME',
+      'AWARD_TITLE', 'AWARD', 'PROJECT', 'CONTRACT_TYPE',
+      'CEILING', 'PM', 'CO', 'CS', 'PROJECT_TITLE',
+      'PROJECT_START', 'PROJECT_END', 'Client_Bureau',
+      'client_organization', 'FLAGS', 'Mod_Status', 'IGE'
+    ];
+
+    // Build column index map
+    var colMap = {};
+    for (var j = 0; j < headers.length; j++) {
+      var h = String(headers[j]).trim();
+      if (wantedColumns.indexOf(h) !== -1) {
+        colMap[h] = j;
+      }
+    }
+
+    console.log('Found', Object.keys(colMap).length, 'of', wantedColumns.length, 'wanted columns');
+
+    // Read ALL data rows in one call (rows 3 to lastRow)
+    var numRows = lastRow - 2;
+    var readStart = new Date();
+    var allValues = sheet.getRange(3, 1, numRows, lastCol).getValues();
+    var readTime = new Date() - readStart;
+    console.log('Read', numRows, 'rows x', lastCol, 'columns in', readTime, 'ms');
+
+    // Filter to wanted columns
+    var tz = Session.getScriptTimeZone();
+    var data = [];
+    var filterStart = new Date();
+
+    for (var i = 0; i < allValues.length; i++) {
+      var row = allValues[i];
+
+      // Skip empty rows
+      if (!row[1] && !row[2]) continue;
+
+      var contract = {};
+
+      for (var colName in colMap) {
+        var val = row[colMap[colName]];
+
+        if (val instanceof Date) {
+          contract[colName] = Utilities.formatDate(val, tz, 'yyyy-MM-dd');
+        } else if (val === '' || val === null || val === undefined) {
+          contract[colName] = '';
+        } else {
+          contract[colName] = val;
+        }
+      }
+
+      data.push(contract);
+    }
+
+    var filterTime = new Date() - filterStart;
+    console.log('Filtered to', data.length, 'rows in', filterTime, 'ms');
+
+    // Cache the data
+    var cacheStart = new Date();
+    var cached = setCachedBulkData(cacheKey, data, 21600); // 6 hours
+
+    if (cached) {
+      // Store hash to indicate cache is valid
+      cache.put('bulk_contracts_hash', currentHash, 21600);
+    }
+
+    var cacheTime = new Date() - cacheStart;
+    console.log('Cached data in', cacheTime, 'ms');
+
+    var totalTime = new Date() - startTime;
+    var originalSize = numRows * lastCol;
+    var filteredSize = data.length * wantedColumns.length;
+    var compressionRatio = ((1 - (filteredSize / originalSize)) * 100).toFixed(1);
+
+    console.log('Total processing time:', totalTime, 'ms');
+    console.log('Data reduction:', originalSize, '->', filteredSize, '(' + compressionRatio + '% reduction)');
+
+    return {
+      success: true,
+      data: data,
+      hash: currentHash,
+      cached: false,
+      rowCount: data.length,
+      originalColumns: lastCol,
+      filteredColumns: wantedColumns.length,
+      compressionRatio: compressionRatio + '%',
+      responseTime: totalTime,
+      readTime: readTime,
+      filterTime: filterTime,
+      cacheTime: cacheTime
+    };
+
+  } catch (e) {
+    console.error('Error in getContractDataBulk:', e);
+    return {
+      success: false,
+      error: e.message,
+      stack: e.stack
+    };
+  }
+}
+
+/**
+ * Get server-side pre-aggregated metadata for dashboard
+ * Computes summary cards, filter options, and chart data
+ * @returns {Object} Aggregated metadata for immediate client rendering
+ */
+function getAggregatedMetadata() {
+  try {
+    var startTime = new Date();
+    var cacheKey = 'aggregated_metadata';
+    var cache = CacheService.getScriptCache();
+
+    // Check if we have cached metadata matching current dataset
+    var currentHash = getDatasetHash();
+    var cachedMetaStr = cache.get(cacheKey);
+
+    if (cachedMetaStr) {
+      try {
+        var cachedMeta = JSON.parse(cachedMetaStr);
+        if (cachedMeta.datasetHash === currentHash) {
+          console.log('Returning cached aggregated metadata');
+          cachedMeta.cached = true;
+          return cachedMeta;
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse cached metadata:', parseError);
+      }
+    }
+
+    console.log('Computing aggregated metadata from scratch');
+
+    // Get bulk data (will use cache if available)
+    var bulkResult = getContractDataBulk();
+
+    if (!bulkResult.success) {
+      return { success: false, error: bulkResult.error };
+    }
+
+    var contracts = bulkResult.data;
+
+    // Helper function to parse currency strings
+    var parseCurrency = function(val) {
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string') {
+        // Remove currency symbols, commas, spaces
+        var cleaned = val.replace(/[$,\s]/g, '');
+        var num = parseFloat(cleaned);
+        return isNaN(num) ? 0 : num;
+      }
+      return 0;
+    };
+
+    // Initialize aggregation structures
+    var statusSet = {};
+    var orgSet = {};
+    var typeSet = {};
+    var statusCounts = {};
+    var orgCeilingSums = {};
+    var yearCounts = {};
+    var yearCeilingSums = {};
+
+    var activeCount = 0;
+    var completedCount = 0;
+    var totalCeiling = 0;
+
+    // Process all contracts
+    for (var i = 0; i < contracts.length; i++) {
+      var c = contracts[i];
+
+      // Summary card metrics
+      var status = String(c.AWARD_STATUS || '').trim();
+      var ceiling = parseCurrency(c.CEILING || 0);
+
+      totalCeiling += ceiling;
+
+      if (status.toLowerCase() === 'active') {
+        activeCount++;
+      }
+      if (status.toLowerCase() === 'completed' || status.toLowerCase() === 'closed') {
+        completedCount++;
+      }
+
+      // Filter options
+      if (status) statusSet[status] = true;
+
+      var org = String(c.Client_Bureau || c.client_organization || '').trim();
+      if (org) orgSet[org] = true;
+
+      var type = String(c.CONTRACT_TYPE || '').trim();
+      if (type) typeSet[type] = true;
+
+      // Chart data - Status counts
+      if (status) {
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      }
+
+      // Chart data - Org ceiling sums
+      if (org) {
+        orgCeilingSums[org] = (orgCeilingSums[org] || 0) + ceiling;
+      }
+
+      // Chart data - Timeline by year
+      var startDate = c.PROJECT_START;
+      if (startDate) {
+        var year = '';
+        if (typeof startDate === 'string' && startDate.length >= 4) {
+          year = startDate.substring(0, 4);
+        } else if (startDate instanceof Date) {
+          year = String(startDate.getFullYear());
+        }
+
+        if (year && year.match(/^\d{4}$/)) {
+          yearCounts[year] = (yearCounts[year] || 0) + 1;
+          yearCeilingSums[year] = (yearCeilingSums[year] || 0) + ceiling;
+        }
+      }
+    }
+
+    // Build filter options arrays
+    var filterOptions = {
+      statuses: Object.keys(statusSet).sort(),
+      organizations: Object.keys(orgSet).sort(),
+      types: Object.keys(typeSet).sort()
+    };
+
+    // Build chart data - Status distribution
+    var statusChartData = [];
+    for (var st in statusCounts) {
+      statusChartData.push({ status: st, count: statusCounts[st] });
+    }
+    statusChartData.sort(function(a, b) { return b.count - a.count; });
+
+    // Build chart data - Top 10 orgs by ceiling + Other
+    var orgChartData = [];
+    for (var org in orgCeilingSums) {
+      orgChartData.push({ org: org, ceiling: orgCeilingSums[org] });
+    }
+    orgChartData.sort(function(a, b) { return b.ceiling - a.ceiling; });
+
+    var topOrgs = orgChartData.slice(0, 10);
+    var otherOrgs = orgChartData.slice(10);
+
+    if (otherOrgs.length > 0) {
+      var otherCeiling = 0;
+      for (var k = 0; k < otherOrgs.length; k++) {
+        otherCeiling += otherOrgs[k].ceiling;
+      }
+      topOrgs.push({ org: 'Other', ceiling: otherCeiling });
+    }
+
+    // Build chart data - Timeline by year
+    var timelineChartData = [];
+    for (var yr in yearCounts) {
+      timelineChartData.push({
+        year: yr,
+        count: yearCounts[yr],
+        ceiling: yearCeilingSums[yr]
+      });
+    }
+    timelineChartData.sort(function(a, b) {
+      return parseInt(a.year) - parseInt(b.year);
+    });
+
+    // Build chart data in {labels, data} format for client
+    var statusLabels = statusChartData.map(function(e) { return e.status; });
+    var statusValues = statusChartData.map(function(e) { return e.count; });
+
+    var orgLabels = topOrgs.map(function(e) { return e.org; });
+    var orgValues = topOrgs.map(function(e) { return e.ceiling; });
+
+    var timelineLabels = timelineChartData.map(function(e) { return e.year; });
+    var timelineValues = timelineChartData.map(function(e) { return e.count; });
+    var trendValues = timelineChartData.map(function(e) { return e.ceiling; });
+
+    // Compute insights: contracts expiring within 30 days
+    var expiringCount = 0;
+    var now = new Date();
+    var thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    for (var m = 0; m < contracts.length; m++) {
+      var endDate = contracts[m].PROJECT_END;
+      if (endDate) {
+        var ed = new Date(endDate);
+        if (!isNaN(ed.getTime()) && ed >= now && ed <= thirtyDaysFromNow) {
+          expiringCount++;
+        }
+      }
+    }
+
+    // Assemble metadata response (matching frontend API contract)
+    var metadata = {
+      success: true,
+      datasetHash: currentHash,
+      cached: false,
+
+      summary: {
+        totalContracts: contracts.length,
+        activeCount: activeCount,
+        completedCount: completedCount,
+        totalCeiling: totalCeiling
+      },
+
+      filters: filterOptions,
+
+      charts: {
+        status: { labels: statusLabels, data: statusValues, label: 'Contracts' },
+        organization: { labels: orgLabels, data: orgValues, label: 'Ceiling Value' },
+        timeline: { labels: timelineLabels, data: timelineValues, label: 'Contracts' },
+        trends: { labels: timelineLabels, data: trendValues, label: 'Total Ceiling' }
+      },
+
+      insights: {
+        expiringWithin30Days: expiringCount,
+        portfolioChange: null
+      },
+
+      deltas: {},
+
+      timestamp: new Date().toISOString(),
+      computeTime: new Date() - startTime
+    };
+
+    // Cache the metadata (shorter TTL since it's smaller)
+    try {
+      cache.put(cacheKey, JSON.stringify(metadata), 3600); // 1 hour
+      console.log('Cached aggregated metadata');
+    } catch (cacheError) {
+      console.warn('Failed to cache metadata:', cacheError);
+    }
+
+    console.log('Computed aggregated metadata in', metadata.computeTime, 'ms');
+
+    return metadata;
+
+  } catch (e) {
+    console.error('Error in getAggregatedMetadata:', e);
+    return {
+      success: false,
+      error: e.message,
+      stack: e.stack
+    };
+  }
+}
+
+// ============================================================================
+// END OPTIMIZED BULK DATA RETRIEVAL FUNCTIONS
+// ============================================================================
+
 /**
  * Enhanced API endpoint to get financial summary with error handling
  * @param {ContractData[]} contracts - Contract data
